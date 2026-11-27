@@ -1,0 +1,6 @@
+{
+  "name": "Sahaaya",
+  "description": "Your Voice. Your Phone. Your Freedom. A voice-first digital accessibility assistant designed for elderly citizens in India.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": []
+}
