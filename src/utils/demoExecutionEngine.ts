@@ -233,7 +233,13 @@ function buildActionLabel(task: AssistantTask, appId: DemoAppId): string {
       : 'Opening Maps view';
   }
   if (appId === 'welfare_form') return 'Populating application form';
-  return `Opening ${DEMO_APP_REGISTRY[appId].name}`;
+  if (task.action === 'set_alarm') {
+    return task.target ? `Set alarm (${task.target})` : 'Set system alarm';
+  }
+  if (task.action === 'make_call') {
+    return 'Place phone call';
+  }
+  return `Opening ${task.application || DEMO_APP_REGISTRY[appId].name}`;
 }
 
 function buildDeviceAppState(
@@ -288,7 +294,11 @@ function buildDeviceAppState(
         { id: 'helpline', label: 'Senior Citizen Helpline (Sample)', value: '14567' },
       ],
       actionMessage:
-        'Simulated Phone screen opened in Demo Mode. No phone call is placed and no contacts are accessed.',
+        lang === 'hi'
+          ? 'डेमो मोड में नकली फ़ोन डायलर दिख रहा है। कोई असली फ़ोन कॉल नहीं की गई है।'
+          : lang === 'kn'
+            ? 'ಡೆಮೊ ಮೋಡ್‌ನಲ್ಲಿ ಸಿಮ್ಯುಲೇಟೆಡ್ ಫೋನ್ ಡಯಲರ್ ತೆರೆದಿದೆ. ಯಾವುದೇ ನಿಜವಾದ ಕರೆ ಮಾಡಲಾಗಿಲ್ಲ.'
+            : 'Simulated Phone screen opened in Demo Mode. No phone call is placed and no contacts are accessed.',
     };
   }
   if (appId === 'messages') {
@@ -301,7 +311,11 @@ function buildDeviceAppState(
         { id: 'sms2', label: 'Bank Alert (Sample)', value: 'Pension credited (Demo)' },
       ],
       actionMessage:
-        'Simulated Messages view opened in Demo Mode. No real SMS messages were sent or read.',
+        lang === 'hi'
+          ? 'डेमो मोड में नकली संदेश स्क्रीन दिख रही है। कोई असली SMS नहीं भेजा या पढ़ा गया है।'
+          : lang === 'kn'
+            ? 'ಡೆಮೊ ಮೋಡ್‌ನಲ್ಲಿ ಸಿಮ್ಯುಲೇಟೆಡ್ ಸಂದೇಶ ಪರದೆ ತೆರೆದಿದೆ. ಯಾವುದೇ ನಿಜವಾದ SMS ಕಳುಹಿಸಲಾಗಿಲ್ಲ.'
+            : 'Simulated Messages view opened in Demo Mode. No real SMS messages were sent or read.',
     };
   }
   if (appId === 'calendar') {
@@ -701,9 +715,17 @@ export function createDemoSessionForTask(
     status = 'completed';
   } else if (task.executionStatus === 'simulated_completed') {
     status = 'simulated_completion';
-  } else if (task.executionStatus === 'failed') {
+  } else if (
+    task.executionStatus === 'failed' ||
+    task.executionStatus === 'unavailable_on_web'
+  ) {
     status = 'failed';
   }
+
+  const resolvedAppName =
+    appId === 'sahaaya_home' && task.application
+      ? task.application
+      : descriptor.name;
 
   const honestNotice = isSimulated
     ? 'SIMULATED — DEMO MODE: Local interactive demonstration only. No external app or real service was modified.'
@@ -714,12 +736,12 @@ export function createDemoSessionForTask(
     mode,
     isSimulated,
     appId,
-    appName: descriptor.name,
+    appName: resolvedAppName,
     recognisedCommand: task.rawInstruction,
     requestedAction: actionLabel,
     status,
     simPhase: status === 'waiting_for_confirmation' ? 'home_screen' : undefined,
-    steps: buildSteps(descriptor.name, actionLabel, status, appId),
+    steps: buildSteps(resolvedAppName, actionLabel, status, appId),
     payload: buildInitialPayload(
       task,
       appId,
@@ -729,11 +751,13 @@ export function createDemoSessionForTask(
       options?.activeField
     ),
     externalUrl: realUrl,
-    externalLabel: task.externalLabel || (realUrl ? `Open Real ${descriptor.name}` : null),
+    externalLabel: task.externalLabel || (realUrl ? `Open Real ${resolvedAppName}` : null),
     resultSummary:
       status === 'waiting_for_confirmation'
         ? 'Waiting for your confirmation before proceeding.'
-        : 'Preparing demonstration...',
+        : status === 'failed'
+          ? task.capabilityNote || 'This action is not supported directly in this browser demo.'
+          : 'Preparing demonstration...',
     honestNotice,
   };
 }
@@ -1195,6 +1219,28 @@ export async function runDemoExecution(
   const appId = resolveDemoAppId(task);
   const baseSession = createDemoSessionForTask(task, mode, lang);
 
+  // Never falsely create or complete native system alarms inside browser demo
+  if (task.action === 'set_alarm') {
+    const alarmReply =
+      lang === 'hi'
+        ? 'यह वेब ब्राउज़र डेमो आपके फ़ोन का असली सिस्टम अलार्म सीधे सेट नहीं कर सकता (इसके लिए भविष्य में Android डिवाइस एकीकरण की आवश्यकता होगी)। विकल्प के रूप में, आप चाहें तो मैं इसे सहाय के स्थानीय डेमो कैलेंडर में एक रिमाइंडर के रूप में जोड़ सकता हूँ।'
+        : lang === 'kn'
+          ? 'ಈ ವೆಬ್ ಬ್ರೌಸರ್ ಡೆಮೊ ನಿಮ್ಮ ಫೋನ್‌ನ ನಿಜವಾದ ಸಿಸ್ಟಮ್ ಅಲಾರಂ ಅನ್ನು ನೇರವಾಗಿ ಇಡಲು ಸಾಧ್ಯವಿಲ್ಲ (ಇದಕ್ಕೆ ಭವಿಷ್ಯದ Android ಸಾಧನ ಏಕೀಕರಣ ಅಗತ್ಯವಿದೆ). ಪರ್ಯಾಯವಾಗಿ, ನೀವು ಬಯಸಿದರೆ ನಾನು ಇದನ್ನು ಸಹಾಯದ ಸ್ಥಳೀಯ ಡೆಮೊ ಕ್ಯಾಲೆಂಡರ್‌ನಲ್ಲಿ ರಿಮೈಂಡರ್ ಆಗಿ ಸೇರಿಸಬಲ್ಲೆ.'
+          : 'This browser demo cannot directly set your phone’s system alarm—that requires future native Android Clock integration. As an alternative, I can add a local reminder in Sahaaya’s Demo Calendar if you would like, without setting a real phone alarm.';
+    return {
+      task: {
+        ...task,
+        executionStatus: 'unavailable_on_web',
+      },
+      session: {
+        ...baseSession,
+        status: 'failed',
+        resultSummary: alarmReply,
+      },
+      replyText: alarmReply,
+    };
+  }
+
   // Real Browser Mode -> use real browser executor when supported
   if (mode === 'real_browser' && DEMO_APP_REGISTRY[appId].supportsRealBrowser) {
     const realRes = await executeConfirmedTask(task, caps, lang, adapter);
@@ -1443,10 +1489,33 @@ export type PendingTaskTurnResolution =
     }
   | {
       handled: true;
+      action: 'edit';
+      task: AssistantTask;
+      session: DemoExecutionSession | null;
+      replyText: string;
+    }
+  | {
+      handled: true;
       action: 'reprompt';
       task: AssistantTask;
       replyText: string;
     };
+
+function isPendingEditRequest(rawText: string): boolean {
+  const normalized = rawText
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?।]+$/g, '')
+    .trim();
+  if (!normalized) return false;
+  return (
+    /^(?:please\s+)?(?:edit|change|modify|update|rewrite)(?:\s+(?:it|this|that|the\s+request|the\s+message|the\s+search|my\s+request))?$/i.test(
+      normalized
+    ) ||
+    /^(?:बदलो|बदलें|संपादित\s*करो|बदलना\s*है)$/.test(normalized) ||
+    /^(?:ಬದಲಿಸಿ|ತಿದ್ದುಪಡಿ\s*ಮಾಡಿ|ಬದಲಾಯಿಸಿ)$/.test(normalized)
+  );
+}
 
 function reconstructTaskFromDemoSession(
   session: DemoExecutionSession
@@ -1518,6 +1587,24 @@ export function evaluatePendingTaskTurn(
     return { handled: false, action: 'none' };
   }
 
+  // Classify substantive new requests BEFORE applying any old pending confirmation
+  const maybeNewCommand = parseNaturalCommand(rawInput, lang);
+  if (
+    maybeNewCommand.matched &&
+    (maybeNewCommand.task?.intent !== 'general_conversation' ||
+      maybeNewCommand.task?.action !== 'polite_ack')
+  ) {
+    return { handled: false, action: 'none' };
+  }
+
+  if (
+    /^(repeat|say again|pardon|help|assist|how to|review|check application|open form|show form|view form|दोहराओ|फिर से बोलो|मदद|सहायता|समीक्षा|फ़ॉर्म|ಮತ್ತೆ ಹೇಳಿ|ಸಹಾಯ|ಪರಿಶೀಲನೆ|ಪರಿಶೀಲಿಸಿ|ಅರ್ಜಿ)$/i.test(
+      rawInput.trim().toLowerCase()
+    )
+  ) {
+    return { handled: false, action: 'none' };
+  }
+
   const decision = classifyPendingConfirmationReply(rawInput);
 
   if (decision === 'confirm') {
@@ -1549,20 +1636,91 @@ export function evaluatePendingTaskTurn(
     };
   }
 
-  const maybeNewCommand = parseNaturalCommand(rawInput, lang);
-  if (
-    maybeNewCommand.matched &&
-    maybeNewCommand.task?.intent !== 'general_conversation'
-  ) {
-    return { handled: false, action: 'none' };
-  }
-
-  if (
-    /^(repeat|say again|pardon|help|assist|how to|review|check application|open form|show form|view form|दोहराओ|फिर से बोलो|मदद|सहायता|समीक्षा|फ़ॉर्म|ಮತ್ತೆ ಹೇಳಿ|ಸಹಾಯ|ಪರಿಶೀಲನೆ|ಪರಿಶೀಲಿಸಿ|ಅರ್ಜಿ)$/i.test(
-      rawInput.trim().toLowerCase()
-    )
-  ) {
-    return { handled: false, action: 'none' };
+  if (isPendingEditRequest(rawInput)) {
+    if (effectiveTask.intent === 'messaging') {
+      const editedTask: AssistantTask = {
+        ...effectiveTask,
+        messageContent: null,
+        missingParameters: ['messageContent'],
+        executionStatus: 'needs_info',
+      };
+      return {
+        handled: true,
+        action: 'edit',
+        task: editedTask,
+        session: createDemoSessionForTask(editedTask, mode, lang),
+        replyText:
+          lang === 'hi'
+            ? 'नया संदेश क्या लिखना है?'
+            : lang === 'kn'
+              ? 'ಹೊಸ ಸಂದೇಶದಲ್ಲಿ ಏನು ಬರೆಯಬೇಕು?'
+              : 'What would you like the new message to say?',
+      };
+    }
+    if (effectiveTask.application === 'YouTube') {
+      const editedTask: AssistantTask = {
+        ...effectiveTask,
+        intent: 'search',
+        action: 'search_youtube',
+        target: null,
+        searchQuery: null,
+        externalUrl: null,
+        missingParameters: ['videoQuery'],
+        executionStatus: 'needs_info',
+      };
+      return {
+        handled: true,
+        action: 'edit',
+        task: editedTask,
+        session: createDemoSessionForTask(editedTask, mode, lang),
+        replyText:
+          lang === 'hi'
+            ? 'आप YouTube पर कौन-सा नया वीडियो खोजना चाहते हैं?'
+            : lang === 'kn'
+              ? 'YouTube ನಲ್ಲಿ ನೀವು ಬೇರೆ ಯಾವ ವೀಡಿಯೊ ಹುಡುಕಲು ಬಯಸುತ್ತೀರಿ?'
+              : 'Which YouTube video would you like me to search for instead?',
+      };
+    }
+    if (effectiveTask.intent === 'search') {
+      const editedTask: AssistantTask = {
+        ...effectiveTask,
+        target: null,
+        searchQuery: null,
+        externalUrl: null,
+        missingParameters: ['query'],
+        executionStatus: 'needs_info',
+      };
+      return {
+        handled: true,
+        action: 'edit',
+        task: editedTask,
+        session: createDemoSessionForTask(editedTask, mode, lang),
+        replyText:
+          lang === 'hi'
+            ? 'आप इसके बजाय क्या खोजना चाहते हैं?'
+            : lang === 'kn'
+              ? 'ಬದಲಿಗೆ ನೀವು ಏನನ್ನು ಹುಡುಕಲು ಬಯಸುತ್ತೀರಿ?'
+              : 'What would you like me to search for instead?',
+      };
+    }
+    const editedTask: AssistantTask = {
+      ...effectiveTask,
+      target: null,
+      missingParameters: ['application'],
+      executionStatus: 'needs_info',
+    };
+    return {
+      handled: true,
+      action: 'edit',
+      task: editedTask,
+      session: createDemoSessionForTask(editedTask, mode, lang),
+      replyText:
+        lang === 'hi'
+          ? 'ठीक है, आप इसके बजाय क्या करना चाहेंगे?'
+          : lang === 'kn'
+            ? 'ಸರಿ, ಬದಲಿಗೆ ನೀವು ಏನು ಮಾಡಲು ಬಯಸುತ್ತೀರಿ?'
+            : 'Sure—what would you like me to open or do instead?',
+    };
   }
 
   const demoPrompt = buildDemoConfirmationPrompt(effectiveTask, mode, lang);

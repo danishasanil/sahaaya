@@ -151,6 +151,8 @@ export interface TranslationBundle {
       emptyHint: string;
       instructionLabel: string;
       detectedTaskLabel: string;
+      applicationLabel: string;
+      requestedActionLabel: string;
       requiredInfoLabel: string;
       statusLabel: string;
       noneNeeded: string;
@@ -408,6 +410,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationBundle> = {
           'Try saying "Open YouTube", "Search for nearby hospitals", "Prepare a message", or "Help me fill out a form".',
         instructionLabel: 'Recognised instruction',
         detectedTaskLabel: 'Detected task',
+        applicationLabel: 'Application',
+        requestedActionLabel: 'Requested action',
         requiredInfoLabel: 'Required information',
         statusLabel: 'Current task status',
         noneNeeded: 'All details ready',
@@ -735,6 +739,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationBundle> = {
           'बोलकर देखें: "Open YouTube", "Search for nearby hospitals", "Prepare a message", या "Help me fill out a form"।',
         instructionLabel: 'समझा गया निर्देश',
         detectedTaskLabel: 'पहचाना गया कार्य',
+        applicationLabel: 'ऐप / सेवा',
+        requestedActionLabel: 'अनुरोधित कार्य',
         requiredInfoLabel: 'आवश्यक जानकारी',
         statusLabel: 'कार्य की स्थिति',
         noneNeeded: 'सभी जानकारी तैयार',
@@ -1062,6 +1068,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationBundle> = {
           'ಹೀಗೆ ಹೇಳಿ ನೋಡಿ: "Open YouTube", "Search for nearby hospitals", "Prepare a message", ಅಥವಾ "Help me fill out a form".',
         instructionLabel: 'ಗುರುತಿಸಿದ ಸೂಚನೆ',
         detectedTaskLabel: 'ಗುರುತಿಸಿದ ಕಾರ್ಯ',
+        applicationLabel: 'ಆ್ಯಪ್ / ಸೇವೆ',
+        requestedActionLabel: 'ವಿನಂತಿಸಿದ ಕ್ರಿಯೆ',
         requiredInfoLabel: 'ಅಗತ್ಯವಿರುವ ಮಾಹಿತಿ',
         statusLabel: 'ಕಾರ್ಯದ ಸ್ಥಿತಿ',
         noneNeeded: 'ಎಲ್ಲಾ ವಿವರ ಸಿದ್ಧವಾಗಿದೆ',

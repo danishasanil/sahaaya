@@ -156,6 +156,13 @@ export interface AssistantTask {
     needsTitle?: boolean;
   } | null;
   educationLevel?: string | null;
+  semanticIntent?: string | null;
+  alarmDraft?: {
+    time: string | null;
+    date: string | null;
+    dateLabel: string | null;
+    period: 'morning' | 'afternoon' | 'evening' | 'night' | null;
+  } | null;
 }
 
 export type UniversalLanguageMode = 'auto' | 'select' | 'custom';

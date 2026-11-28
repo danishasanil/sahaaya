@@ -11,8 +11,11 @@ import {
   buildCalendarPrompt,
   extractCalendarCommand,
   extractDateFromText,
+  extractTimeDetailsFromText,
   extractTimeFromText,
 } from './calendarEngine';
+import { buildYouTubeSearchUrl } from './platformExecutor';
+import { normalizeSpeechCommandPronunciation } from './pronunciationAndLanguageEngine';
 
 export interface CommandParseResult {
   matched: boolean;
@@ -53,7 +56,7 @@ const KNOWN_APPS: KnownAppDefinition[] = [
   { canonicalName: 'Messages', patterns: [/\bmessages\b/i, /\bsms\b/i, /संदेश|मैसेज/, /ಸಂದೇಶ/] },
   { canonicalName: 'Gallery', patterns: [/\bgallery\b/i, /\bphotos\b/i, /गैलरी/, /ಗ್ಯಾಲರಿ/] },
   { canonicalName: 'Calendar', patterns: [/\bcalendar\b/i, /कैलेंडर/, /ಕ್ಯಾಲೆಂಡರ್/] },
-  { canonicalName: 'Clock', patterns: [/\bclock\b/i, /\balarm\b/i, /घड़ी|अलार्म/, /ಗಡಿಯಾರ|ಅಲಾರ್ಮ್/] },
+  { canonicalName: 'Clock', patterns: [/\bclock\b/i, /\balarm\b/i, /घड़ी|अलार्म|अलारम/, /ಗಡಿಯಾರ|ಅಲರಾಂ|ಅಲಾರಂ|ಅಲಾರಾಂ/] },
   { canonicalName: 'Calculator', patterns: [/\bcalculator\b/i, /कैलकुलेटर/, /ಕ್ಯಾಲ್ಕುಲೇಟರ್/] },
 ];
 
@@ -141,43 +144,27 @@ export function normalizeConfirmationText(rawText: string): string {
 }
 
 const NEGATIVE_CANCEL_REGEX =
-  /\b(no|no thanks|no thank you|nope|cancel|stop|never mind|nevermind|dont|do not|dont do it|do not do it|abort|not now|not sure|not right|not correct|wrong|dont open|do not open|skip it|skip this|forget it|forget that|leave it|discard|start over|do something else|lets do something else)\b/;
+  /^(?:(?:no|nope)(?:\s+(?:thanks|thank you|cancel|cancel it|cancel this|cancel that|stop|stop it|abort|forget it|forget that|skip it|skip this|never mind|nevermind|dont|do not|dont do it|do not do it|dont open|do not open|dont open it|do not open it|dont send|do not send|dont send it|do not send it|not now|leave it|discard))?|cancel|cancel it|cancel this|cancel that|stop|stop it|never mind|nevermind|dont|do not|dont do it|do not do it|abort|not now|not sure|thats not right|that is not right|not right|not correct|wrong|dont open|do not open|dont open it|do not open it|dont send|do not send|dont send it|do not send it|skip it|skip this|forget it|forget that|leave it|discard|start over|do something else|lets do something else)(?:\s+(?:please|thanks|thank you))?$/;
 
-const NEGATIVE_SUBSTRINGS = [
-  'नहीं',
-  'रद्द',
-  'मत करो',
-  'रुको',
-  'बंद करो',
-  'छोड़ो',
-  'रहने दो',
-  'ಬೇಡ',
-  'ಇಲ್ಲ',
-  'ರದ್ದು',
-  'ನಿಲ್ಲಿಸಿ',
-  'ಬಿಡಿ',
-];
+const NEGATIVE_EXACT_REGEX =
+  /^(?:नहीं|ना|मत\s*करो|रद्द\s*(?:करो|करें|कर\s*दो)?|रुको|बंद\s*करो|छोड़ो|रहने\s*दो|ಬೇಡ|ಇಲ್ಲ|ರದ್ದು\s*(?:ಮಾಡಿ)?|ನಿಲ್ಲಿಸಿ|ಬಿಡಿ)(?:[\s,]+(?:धन्यवाद|शुक्रिया|कृपया|ಧನ್ಯವಾದ|ದಯವಿಟ್ಟು|ಬೇಡ))?$/;
 
 const AFFIRMATIVE_EXACT_OR_PREFIX_REGEX =
   /^(yes|yeah|yep|yea|sure|ok|okay|absolutely|definitely|of course|proceed|continue|confirm|correct|right|alright|fine|affirmative)(\s+(please|go ahead|do it|do that|open|open it|open that|open the draft|send|send it|continue|proceed|sure|ok|okay|correct|right|thanks|thank you))*$/;
 
 const AFFIRMATIVE_PHRASE_REGEX =
-  /\b(yes please|yes please open|yes please open it|yes go ahead|yeah sure|go ahead and open it|go ahead and open|go ahead|please continue|please proceed|do it|do that|please do|please do it|please open|please open it|open it|open that|open the draft|thats right|that is right|you can open|you can proceed|sounds good|send it|please send)\b/;
+  /^(?:(?:yes|yeah|sure|ok|okay|alright|please|well)\s+)*(?:yes please|yes please open|yes please open it|yes go ahead|yeah sure|go ahead and open it|go ahead and open|go ahead|please continue|please proceed|do it|do that|please do|please do it|please open|please open it|open it|open that|open the draft|thats right|that is right|you can open|you can proceed|sounds good|send it|please send|please send it)(?:\s+(?:please|now|thanks|thank you))?$/;
 
-const AFFIRMATIVE_SUBSTRINGS = [
-  'हाँ',
-  'हां',
-  'सही',
-  'ठीक है',
-  'चलो',
-  'आगे बढ़ो',
-  'खोल दो',
-  'कर दो',
-  'ಹೌದು',
-  'ಸರಿ',
-  'ಮುಂದುವರಿಸಿ',
-  'ತೆರೆಯಿರಿ',
-];
+const AFFIRMATIVE_EXACT_INDIC_REGEX =
+  /^(?:हाँ|हां|जी|जी\s*हाँ|सही|सही\s*है|ठीक\s*है|बिल्कुल|चलो|आगे\s*बढ़ो|आगे\s*बढ़ें|खोल\s*दो|कर\s*दो|भेज\s*दो|ಹೌದು|ಸರಿ|ಖಂಡಿತ|ಮುಂದುವರಿಸಿ|ಮುಂದುವರೆಸಿ|ತೆರೆಯಿರಿ|ಮಾಡಿ|ಕಳುಹಿಸಿ)(?:[\s,]+(?:कृपया|प्लीज|आगे\s*बढ़ो|आगे\s*बढ़ें|खोल\s*दो|कर\s*दो|भेज\s*दो|ದಯವಿಟ್ಟು|ಮುಂದುವರಿಸಿ|ಮುಂದುವರೆಸಿ|ತೆರೆಯಿರಿ|ಮಾಡಿ|ಕಳುಹಿಸಿ))*$/;
+
+function stripTrailingIndicPunctuation(rawText: string): string {
+  return rawText
+    .trim()
+    .replace(/[.!?।,]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 export function classifyPendingConfirmationReply(
   rawText: string
@@ -186,10 +173,11 @@ export function classifyPendingConfirmationReply(
   if (!text) return null;
 
   const normalized = normalizeConfirmationText(text);
+  const indicCleaned = stripTrailingIndicPunctuation(text).replace(/[,]+/g, ' ').replace(/\s+/g, ' ').trim();
 
   if (
     NEGATIVE_CANCEL_REGEX.test(normalized) ||
-    NEGATIVE_SUBSTRINGS.some((s) => text.includes(s))
+    NEGATIVE_EXACT_REGEX.test(indicCleaned)
   ) {
     return 'cancel';
   }
@@ -202,7 +190,7 @@ export function classifyPendingConfirmationReply(
   if (
     AFFIRMATIVE_EXACT_OR_PREFIX_REGEX.test(normalized) ||
     AFFIRMATIVE_PHRASE_REGEX.test(normalized) ||
-    AFFIRMATIVE_SUBSTRINGS.some((s) => text.includes(s))
+    AFFIRMATIVE_EXACT_INDIC_REGEX.test(indicCleaned)
   ) {
     return 'confirm';
   }
@@ -351,7 +339,9 @@ export function normalizeConversationalUtterance(rawInstruction: string): string
   let core = rawInstruction.trim();
   const prefixPatterns = [
     /^(?:(?:hey|hi|hello)\s+)?sahaaya[, ]+\s*/i,
+    /^(?:yes|yeah|sure|ok|okay|no|nope|actually|wait)[,\s]+(?=(?:please|kindly|can|could|would|open|launch|start|set|create|find|search|calculate|add|schedule|send|prepare|tell|wish|play|watch|show|make|wake)\b)/i,
     /^(?:can\s+you|could\s+you|would\s+you|will\s+you)\s+/i,
+    /^(?:i\s+would\s+like\s+you\s+to|i'd\s+like\s+you\s+to|i\s+want\s+you\s+to|i\s+need\s+you\s+to)\s+/i,
     /^(?:i\s+would\s+like\s+to|i'd\s+like\s+to|i\s+want\s+to|i\s+need\s+to|i\s+wish\s+to)\s+/i,
     /^(?:please|kindly)\s+/i,
     /^(?:help\s+me\s+(?:to\s+)?)/i,
@@ -458,10 +448,13 @@ function extractVideoQuery(commandCore: string): {
     raw
       .replace(/^\s*(?:on|in|from)\s+youtube\b/i, '')
       .replace(
-        /^\s*(?:that|which)\s+(?:shows?|teaches?|explains?|demonstrates?|tells?|has)\s+(?:the\s+|me\s+)?/i,
+        /^\s*(?:that|which)\s+(?:helps?\s+me\s+(?:to\s+)?(?:understand|learn(?:\s+about)?|know(?:\s+about)?)|shows?(?:\s+me)?|teaches?(?:\s+me)?|explains?(?:\s+to\s+me)?|demonstrates?|tells?(?:\s+me)?|has|is\s+about)\s+(?:the\s+|me\s+)?/i,
         ''
       )
-      .replace(/^\s*(?:showing|teaching|explaining|demonstrating)\s+(?:the\s+|me\s+)?/i, '')
+      .replace(
+        /^\s*(?:to\s+help\s+me\s+(?:understand|learn(?:\s+about)?)|showing|teaching|explaining|demonstrating)\s+(?:the\s+|me\s+)?/i,
+        ''
+      )
       .replace(/^\s*(?:about|of|on|for|with)\s+(?:the\s+)?/i, '')
       .replace(/^\s*(?:a|an|the|some)\s+/i, '')
       .replace(/\s+(?:youtube\s+)?videos?(?:\s+(?:on|in)\s+youtube)?[.!?]*$/i, '')
@@ -484,7 +477,7 @@ function extractVideoQuery(commandCore: string): {
     };
   }
 
-  // 2. Explicit YouTube search ("Search YouTube for English lessons")
+  // 2. Explicit YouTube search ("Search YouTube for English lessons", "Find a Surya Namaskara tutorial on YouTube")
   const searchYouTubeMatch = commandCore.match(
     /^(?:search(?:\s+on)?\s+youtube(?:\s+for)?|find\s+(?:on\s+)?youtube(?:\s+for)?)\s+(.+)$/i
   );
@@ -498,6 +491,27 @@ function extractVideoQuery(commandCore: string): {
           ? cleaned
           : null,
     };
+  }
+
+  // 2b. "<verb> ... (youtube) video ... <showing/explaining/that helps...> <postTopic>"
+  // Handles e.g. "open a yoga video showing how to perform Surya Namaskara?"
+  const preAndPostVideoMatch = commandCore.match(
+    /^(?:open|show(?:\s+me)?|find|play|watch|search(?:\s+for)?|get(?:\s+me)?|look\s+for|looking\s+for)\s+(?:a\s+|an\s+|any\s+|the\s+|some\s+)?(.+?)\s+(?:youtube\s+)?videos?\s+(.+)$/i
+  );
+  if (preAndPostVideoMatch) {
+    const prePart = cleanTopic(preAndPostVideoMatch[1]);
+    const postPart = cleanTopic(preAndPostVideoMatch[2]);
+    const chosen =
+      postPart.length >= 4 && !/^(?:on|in)\s+youtube$/i.test(postPart)
+        ? postPart
+        : prePart;
+    if (chosen.length >= 2 && !/^(youtube|a|an|the|any|some|particular)$/i.test(chosen)) {
+      return {
+        matched: true,
+        isYouTubeSearch: /^search(?:\s+for)?\b/i.test(commandCore),
+        query: chosen,
+      };
+    }
   }
 
   // 3. Topic before "video(s)" ("Play a chicken curry cooking video", "Can you help me find a yoga video?")
@@ -595,8 +609,10 @@ export function parseNaturalCommand(
   lang: LanguageCode = 'en'
 ): CommandParseResult {
   const text = rawInstruction.trim();
-  const lower = text.toLowerCase();
-  const commandCore = normalizeConversationalUtterance(text);
+  const pronNormalized = normalizeSpeechCommandPronunciation(text).normalizedCommand;
+  const effectiveText = pronNormalized || text;
+  const lower = effectiveText.toLowerCase();
+  const commandCore = normalizeConversationalUtterance(effectiveText);
   const commandCoreLower = commandCore.toLowerCase();
 
   // P4. Scholarship Discovery Intent (checked BEFORE welfare application_task so scholarships never open Senior Welfare Form)
@@ -736,6 +752,98 @@ export function parseNaturalCommand(
       matched: true,
       task,
       replyText: buildCalculatorReply(calcRes, lang),
+    };
+  }
+
+  // P5b. Unsupported Native System Alarms (EN / HI / KN — never falsely claim an alarm was created)
+  if (
+    /\b(?:set|create|put|add|turn\s+on|schedule)\b.*\balarms?\b|\balarms?\s+(?:for|at)\b|\bwake\s+me\s+up\b/i.test(
+      lower
+    ) ||
+    /अलार्म|अलारम/.test(text) ||
+    /(?:सुबह|बजे|कल|आज).*जगा\s*(?:दो|देना|दीजिए)/.test(text) ||
+    /ಅಲರಾಂ|ಅಲಾರಂ|ಅಲಾರಾಂ/.test(text) ||
+    /(?:ಗಂಟೆಗೆ|ನಾಳೆ|ಇಂದು|ಬೆಳಗ್ಗೆ|ಬೆಳಿಗ್ಗೆ|ನನ್ನನ್ನು).*ಎಬ್ಬಿಸಿ/.test(text)
+  ) {
+    const timeDetails = extractTimeDetailsFromText(text);
+    const extractedTime = timeDetails.time24;
+    const extractedDate = extractDateFromText(text);
+    const alarmSummaryParts: string[] = [];
+    if (extractedDate.label) alarmSummaryParts.push(extractedDate.label);
+    if (extractedTime) alarmSummaryParts.push(extractedTime);
+    if (timeDetails.period) alarmSummaryParts.push(timeDetails.period);
+    const alarmLabel =
+      alarmSummaryParts.length > 0
+        ? `Alarm (${alarmSummaryParts.join(' · ')})`
+        : 'System Alarm';
+    const task: AssistantTask = {
+      id: createTaskId(),
+      rawInstruction: text,
+      normalizedInstruction: commandCore,
+      intent: 'app_launch',
+      semanticIntent: 'SET_ALARM',
+      application: 'Clock / Alarm',
+      action: 'set_alarm',
+      target: alarmLabel,
+      messageContent: null,
+      alarmDraft: {
+        time: extractedTime,
+        date: extractedDate.date,
+        dateLabel: extractedDate.label,
+        period: timeDetails.period,
+      },
+      requiredParameters: [],
+      missingParameters: [],
+      confirmationRequired: false,
+      executionStatus: 'unavailable_on_web',
+      capabilityNote:
+        'Browser demo cannot directly set phone system alarms (requires future native Android Clock integration). Offered local Demo Calendar reminder as an alternative.',
+    };
+    return {
+      matched: true,
+      task,
+      replyText:
+        lang === 'hi'
+          ? 'यह वेब ब्राउज़र डेमो आपके फ़ोन का असली सिस्टम अलार्म सीधे सेट नहीं कर सकता (इसके लिए भविष्य में Android डिवाइस एकीकरण की आवश्यकता होगी)। विकल्प के रूप में, आप चाहें तो मैं इसे सहाय के स्थानीय डेमो कैलेंडर में एक रिमाइंडर के रूप में जोड़ सकता हूँ।'
+          : lang === 'kn'
+            ? 'ಈ ವೆಬ್ ಬ್ರೌಸರ್ ಡೆಮೊ ನಿಮ್ಮ ಫೋನ್‌ನ ನಿಜವಾದ ಸಿಸ್ಟಮ್ ಅಲಾರಂ ಅನ್ನು ನೇರವಾಗಿ ಇಡಲು ಸಾಧ್ಯವಿಲ್ಲ (ಇದಕ್ಕೆ ಭವಿಷ್ಯದ Android ಸಾಧನ ಏಕೀಕರಣ ಅಗತ್ಯವಿದೆ). ಪರ್ಯಾಯವಾಗಿ, ನೀವು ಬಯಸಿದರೆ ನಾನು ಇದನ್ನು ಸಹಾಯದ ಸ್ಥಳೀಯ ಡೆಮೊ ಕ್ಯಾಲೆಂಡರ್‌ನಲ್ಲಿ ರಿಮೈಂಡರ್ ಆಗಿ ಸೇರಿಸಬಲ್ಲೆ.'
+            : 'This browser demo cannot directly set your phone’s system alarm—that requires future native Android Clock integration. As an alternative, I can add a local reminder in Sahaaya’s Demo Calendar if you would like, without setting a real phone alarm.',
+    };
+  }
+
+  // P5c. Native Phone Calls ("Make a phone call", "Call my brother", HI/KN)
+  if (
+    /^(?:please\s+)?(?:make\s+(?:a\s+)?(?:phone\s+)?call|place\s+(?:a\s+)?call|call\s+(?:someone|my\s+[\w\s]+|\d{5,})|dial\s+(?:a\s+number|\d{3,}))[.!?]*$/i.test(
+      commandCoreLower
+    ) ||
+    /(?:फ़ोन\s*कॉल|कॉल\s*(?:करो|लगाओ|करना))/.test(text) ||
+    /(?:ಫೋನ್\s*ಕರೆ|ಕರೆ\s*(?:ಮಾಡಿ|ಮಾಡಬೇಕು))/.test(text)
+  ) {
+    const task: AssistantTask = {
+      id: createTaskId(),
+      rawInstruction: text,
+      normalizedInstruction: commandCore,
+      intent: 'app_launch',
+      application: 'Phone',
+      action: 'make_call',
+      target: 'Phone Call',
+      messageContent: null,
+      requiredParameters: [],
+      missingParameters: [],
+      confirmationRequired: false,
+      executionStatus: 'unavailable_on_web',
+      capabilityNote:
+        'Browser demo cannot place cellular phone calls directly (requires future native Android Phone integration).',
+    };
+    return {
+      matched: true,
+      task,
+      replyText:
+        lang === 'hi'
+          ? 'यह वेब ब्राउज़र डेमो असली फ़ोन कॉल नहीं कर सकता (इसके लिए Android डिवाइस एकीकरण की आवश्यकता है)। डेमो मोड में आप नकली डायलर स्क्रीन देख सकते हैं, या WhatsApp संदेश ड्राफ्ट तैयार कर सकते हैं।'
+          : lang === 'kn'
+            ? 'ಈ ವೆಬ್ ಬ್ರೌಸರ್ ಡೆಮೊ ನಿಜವಾದ ಫೋನ್ ಕರೆ ಮಾಡಲು ಸಾಧ್ಯವಿಲ್ಲ (ಇದಕ್ಕೆ Android ಸಾಧನ ಏಕೀಕರಣ ಅಗತ್ಯವಿದೆ). ಡೆಮೊ ಮೋಡ್‌ನಲ್ಲಿ ನೀವು ಸಿಮ್ಯುಲೇಟೆಡ್ ಡಯಲರ್ ನೋಡಬಹುದು ಅಥವಾ WhatsApp ಸಂದೇಶ ಸಿದ್ಧಪಡಿಸಬಹುದು.'
+            : 'This browser demo cannot place real phone calls directly—calling requires future native Android integration. In Interactive Demo Mode you can preview the simulated Phone dialer, or I can help you prepare a WhatsApp message draft instead.',
     };
   }
 
@@ -1188,16 +1296,27 @@ export function parseNaturalCommand(
       /जन्मदिन\s*की\s*शुभकामना|संदेश\s*भेज|व्हाट्सएप\s*संदेश/.test(text) ||
       /ಹುಟ್ಟುಹಬ್ಬದ\s*ಶುಭಾಶಯ|ಸಂದೇಶ\s*ಕಳುಹಿಸಿ|ವಾಟ್ಸಾಪ್\s*ಸಂದೇಶ/.test(text));
 
+  const isHindiMessaging =
+    /(?:व्हाट्सएप|व्हाट्सऐप|संदेश|मैसेज)/.test(text) &&
+    /(?:भेज|तैयार|लिख|करना|करो|बनाओ)/.test(text);
+  const isKannadaMessaging =
+    /(?:ವಾಟ್ಸಾಪ್|ಸಂದೇಶ|ಮೆಸೇಜ್)/.test(text) &&
+    /(?:ಕಳುಹಿಸ|ತಯಾರಿಸ|ಸಿದ್ಧಪಡಿಸ|ಬರೆ|ಬೇಕು|ಮಾಡಿ)/.test(text);
+
   if (
     !/\byoutube\b/i.test(lower) &&
     (isBirthdayOrWishMsg ||
+      isHindiMessaging ||
+      isKannadaMessaging ||
       /\b(?:send|compose|prepare|write)\s+(?:(?:\w+\s+){0,4}?)(?:whatsapp\s+|text\s+)?messages?\b|\bmessage\s+(?:to|for)\b|\bi\s+want\s+to\s+message\b|\bwhatsapp\s+message\b|\btext\s+message\b/i.test(
         lower
       ))
   ) {
     const isWhatsApp =
       /\bwhatsapp\b/i.test(lower) ||
-      /व्हाट्सएप|ವಾಟ್ಸಾಪ್/.test(text) ||
+      /व्हाट्सएप|व्हाट्सऐप|ವಾಟ್ಸಾಪ್/.test(text) ||
+      isHindiMessaging ||
+      isKannadaMessaging ||
       isBirthdayOrWishMsg;
     const appName = isWhatsApp ? 'WhatsApp' : 'Messages / WhatsApp';
 
@@ -1237,7 +1356,7 @@ export function parseNaturalCommand(
           : rawBody;
       } else {
         // Hindi: "... संदेश भेजो कि <body...>"
-        const hiBody = text.match(/(?:कि|संदेश\s+लिखो)\s+(.+)$/);
+        const hiBody = text.match(/(?:कि|संदेश\s+लिखो|मैसेज\s+लिखो)\s+(.+)$/);
         if (hiBody && hiBody[1].trim()) {
           messageContent = hiBody[1].trim();
         }
@@ -1288,16 +1407,17 @@ export function parseNaturalCommand(
       }
     }
 
-    // Hindi/Kannada recipient extraction ("मेरे बेटे को...", "बेटी को...", "ಮಗಳಿಗೆ...", "ನನ್ನ ಸ್ನೇಹಿತೆಗೆ...")
+    // Hindi/Kannada recipient extraction ("मेरे भाई को व्हाट्सएप मैसेज...", "मेरे भाई के लिए मैसेज...", "ನನ್ನ ಅಣ್ಣನಿಗೆ ವಾಟ್ಸಾಪ್ ಮೆಸೇಜ್...")
     if (!recipient) {
       const hiRecip = text.match(
-        /(?:मेरे\s+|मेरी\s+)?([\u0900-\u097F]+)\s+को\s+(?:जन्मदिन|व्हाट्सएप|संदेश)/
+        /(?:मेरे\s+|मेरी\s+|अपने\s+|अपनी\s+)?([\u0900-\u097F]+)\s+(?:को|के\s+लिए)\s+(?:जन्मदिन|व्हाट्सएप|व्हाट्सऐप|संदेश|मैसेज)/
       );
       if (hiRecip) recipient = hiRecip[1].trim();
     }
     if (!recipient) {
-      const knRecip = text.match(
-        /(?:ನನ್ನ\s+)?([\u0C80-\u0CFF]+?)(?:ಗೆ|ರಿಗೆ|ಗೆ\s)/
+      const knTextClean = text.replace(/[\u200C\u200D]/g, '');
+      const knRecip = knTextClean.match(
+        /(?:ನನ್ನ\s+)?([\u0C80-\u0CFF]+?)(?:ನಿಗೆ|ರಿಗೆ|ಗೆ)(?:\s|$)/
       );
       if (knRecip && knRecip[1].trim().length >= 2) {
         recipient = knRecip[1].trim();
@@ -1490,21 +1610,23 @@ export function parseNaturalCommand(
   }
 
   // B1-HI/KN. Hindi & Kannada YouTube / Video Requests
-  if (/वीडियो|यूट्यूब|रेसिपी|भजन|चलाओ|दिखाओ/.test(text) && !/कैलकुलेटर|कैलेंडर|अस्पताल|छात्रवृत्ति/.test(text)) {
+  if (/वीडियो|यूट्यूब|रेसिपी|भजन|चलाओ|दिखाओ/.test(text) && !/कैलकुलेटर|कैलेंडर|अस्पताल|छात्रवृत्ति|अलार्म/.test(text)) {
     const hiTopic = text
-      .replace(/^(?:कृपया\s+)?(?:मुझे\s+)?(?:यूट्यूब\s*(?:खोलो|पर)?\s*(?:और)?\s*)?/i, '')
-      .replace(/\s*(?:का\s+वीडियो\s*दिखाओ|वीडियो\s*दिखाओ|दिखाओ|चलाओ)[.।!?]*$/i, '')
+      .replace(/^(?:कृपया\s+)?(?:मुझे\s+)?(?:यूट्यूब\s*(?:खोलो|खोलें|पर|में)?\s*(?:और)?\s*)?/i, '')
+      .replace(/\s*(?:यूट्यूब\s*(?:पर|में)\s*)?(?:का\s+|के\s+|की\s+)?(?:वीडियो\s*(?:दिखाओ|दिखाइए|चलाओ|खोलो)|वीडियो|दिखाओ|दिखाइए|चलाओ)[.।!?]*$/i, '')
+      .replace(/\s*(?:का|के|की)\s*$/i, '')
       .trim();
     if (hiTopic.length >= 2) {
       const task: AssistantTask = {
         id: createTaskId(),
         rawInstruction: text,
         normalizedInstruction: hiTopic,
-        intent: 'app_launch',
+        intent: 'search',
         application: 'YouTube',
-        action: 'play_video',
+        action: 'search_youtube',
         target: hiTopic,
         searchQuery: hiTopic,
+        externalUrl: buildYouTubeSearchUrl(hiTopic),
         messageContent: null,
         locationIntent: 'none',
         requiredParameters: ['videoQuery'],
@@ -1520,21 +1642,23 @@ export function parseNaturalCommand(
     }
   }
 
-  if (/ವೀಡಿಯೊ|ಯೂಟ್ಯೂಬ್|ರೆಸಿಪಿ|ತೋರಿಸಿ|ಪ್ಲೇ\s*ಮಾಡಿ/.test(text) && !/ಕ್ಯಾಲ್ಕುಲೇಟರ್|ಕ್ಯಾಲೆಂಡರ್|ಆಸ್ಪತ್ರೆ|ವಿದ್ಯಾರ್ಥಿವೇತನ/.test(text)) {
+  if (/ವೀಡಿಯೊ|ವಿಡಿಯೋ|ಯೂಟ್ಯೂಬ್|ರೆಸಿಪಿ|ತೋರಿಸಿ|ಪ್ಲೇ\s*ಮಾಡಿ/.test(text) && !/ಕ್ಯಾಲ್ಕುಲೇಟರ್|ಕ್ಯಾಲೆಂಡರ್|ಆಸ್ಪತ್ರೆ|ವಿದ್ಯಾರ್ಥಿವೇತನ|ಅಲಾರಂ|ಅಲಾರಾಂ/.test(text)) {
     const knTopic = text
-      .replace(/^(?:ದಯವಿಟ್ಟು\s+)?(?:ನನಗೆ\s+)?(?:ಯೂಟ್ಯೂಬ್\s*(?:ತೆರೆಯಿರಿ|ನಲ್ಲಿ)?\s*(?:ಮತ್ತು)?\s*)?/i, '')
-      .replace(/\s*(?:ವೀಡಿಯೊ\s*ತೋರಿಸಿ|ತೋರಿಸಿ|ಪ್ಲೇ\s*ಮಾಡಿ)[.!?]*$/i, '')
+      .replace(/^(?:ದಯವಿಟ್ಟು\s+)?(?:ನನಗೆ\s+)?(?:ಯೂಟ್ಯೂಬ್\s*(?:ತೆರೆಯಿರಿ|ನಲ್ಲಿ|ಅಲ್ಲಿ)?\s*(?:ಮತ್ತು)?\s*)?/i, '')
+      .replace(/\s*(?:ಯೂಟ್ಯೂಬ್‌?(?:ನಲ್ಲಿ|ಅಲ್ಲಿ)\s*)?(?:ವೀಡಿಯೊ|ವಿಡಿಯೋ)?\s*(?:ತೋರಿಸಿ|ಪ್ಲೇ\s*ಮಾಡಿ|ಹುಡುಕಿ|ತೆರೆಯಿರಿ)[.!?]*$/i, '')
+      .replace(/ದ\s*$/i, '')
       .trim();
     if (knTopic.length >= 2) {
       const task: AssistantTask = {
         id: createTaskId(),
         rawInstruction: text,
         normalizedInstruction: knTopic,
-        intent: 'app_launch',
+        intent: 'search',
         application: 'YouTube',
-        action: 'play_video',
+        action: 'search_youtube',
         target: knTopic,
         searchQuery: knTopic,
+        externalUrl: buildYouTubeSearchUrl(knTopic),
         messageContent: null,
         locationIntent: 'none',
         requiredParameters: ['videoQuery'],
@@ -1563,6 +1687,7 @@ export function parseNaturalCommand(
       action: videoRes.isYouTubeSearch ? 'search_youtube' : 'play_video',
       target: hasTopic ? videoRes.query : null,
       searchQuery: hasTopic ? videoRes.query : null,
+      externalUrl: hasTopic ? buildYouTubeSearchUrl(videoRes.query!) : null,
       messageContent: null,
       locationIntent: 'none',
       requiredParameters: ['videoQuery'],
@@ -1720,6 +1845,7 @@ export function parseNaturalCommand(
       action: isYouTubeSearch ? 'search_youtube' : 'web_search',
       target: targetDisplay,
       searchQuery: hasQuery ? cleanedQuery : null,
+      externalUrl: isYouTubeSearch && hasQuery ? buildYouTubeSearchUrl(cleanedQuery) : undefined,
       messageContent: null,
       locationIntent: isNearby && !isYouTubeSearch ? 'nearby' : 'none',
       requiresLocation: isNearby && !isYouTubeSearch && !isGoogle,
@@ -1801,8 +1927,11 @@ export function parseNaturalCommand(
       };
     }
 
-    // Unknown application fallback (make sure it doesn't swallow phrases like "open my application")
-    if (!/\b(application|form)\b/i.test(requestedTarget)) {
+    // Unknown application fallback (make sure it doesn't swallow phrases like "open my application" or pronoun confirmations like "open it")
+    if (
+      !/\b(application|form)\b/i.test(requestedTarget) &&
+      !/^(?:it|this|that|them|one|this one|that one)$/i.test(requestedTarget)
+    ) {
       const task: AssistantTask = {
         id: createTaskId(),
         rawInstruction: text,
@@ -2014,6 +2143,8 @@ export function advanceTaskConversation(
       const nextTask: AssistantTask = {
         ...task,
         target: cleaned,
+        searchQuery: cleaned,
+        externalUrl: buildYouTubeSearchUrl(cleaned),
         missingParameters: [],
         executionStatus: 'awaiting_confirmation',
       };
@@ -2142,6 +2273,10 @@ export function advanceTaskConversation(
       ...task,
       target: refinedQuery,
       searchQuery: refinedQuery,
+      externalUrl:
+        task.action === 'search_youtube'
+          ? buildYouTubeSearchUrl(refinedQuery)
+          : task.externalUrl,
       educationLevel: task.action === 'scholarship_search' ? cleaned : task.educationLevel,
       missingParameters: [],
       executionStatus: 'awaiting_confirmation',

@@ -33,6 +33,7 @@ import { evaluateMathExpression } from '../src/utils/calculatorEngine';
 import {
   buildCalendarMonthGrid,
   extractCalendarCommand,
+  formatIsoDate,
   updateDemoCalendarEventInStore,
 } from '../src/utils/calendarEngine';
 import {
@@ -57,6 +58,10 @@ import {
   SpeechSynthesisLike,
   SpeechSynthesisUtteranceLike,
 } from '../src/utils/speechSessionController';
+import {
+  buildLowConfidenceClarificationReply,
+  detectSpokenLanguage,
+} from '../src/utils/pronunciationAndLanguageEngine';
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -3572,7 +3577,672 @@ async function runTests() {
     passed += 1;
   }
 
-  console.log(`SAHAAYA TEST SUITE PASSED: ${passed}/123 scenarios verified.`);
+  // Test 124: Natural-language YouTube intent recognition & encoded search URL execution
+  {
+    const caps = detectPlatformCapabilities({ userAgent: 'Chrome/126.0', platform: 'Win32' });
+    const queries: Array<{ input: string; expectedSubstring: string }> = [
+      {
+        input: 'I would like you to open a YouTube video that helps me understand artificial intelligence jobs.',
+        expectedSubstring: 'artificial intelligence jobs',
+      },
+      {
+        input: 'Can you open a yoga video showing how to perform Surya Namaskara?',
+        expectedSubstring: 'Surya Namaskara',
+      },
+      {
+        input: 'Find a video explaining machine learning for beginners.',
+        expectedSubstring: 'machine learning for beginners',
+      },
+      {
+        input: 'Find a Surya Namaskara tutorial on YouTube.',
+        expectedSubstring: 'Surya Namaskara tutorial',
+      },
+    ];
+
+    for (const q of queries) {
+      const parsed = parseNaturalCommand(q.input, 'en');
+      assert.equal(parsed.matched, true, `Should match YouTube request: "${q.input}"`);
+      assert.equal(parsed.task?.application, 'YouTube');
+      assert.equal(parsed.task?.executionStatus, 'awaiting_confirmation');
+      assert.ok(
+        parsed.task?.target?.toLowerCase().includes(q.expectedSubstring.toLowerCase()),
+        `Expected target "${parsed.task?.target}" to include "${q.expectedSubstring}"`
+      );
+      assert.ok(
+        parsed.task?.externalUrl?.startsWith('https://www.youtube.com/results?search_query='),
+        `Expected encoded YouTube search URL, got ${parsed.task?.externalUrl}`
+      );
+    }
+
+    // Confirming with "Yes." executes and opens encoded search URL without falsely claiming a video played
+    const suryaParsed = parseNaturalCommand('Find a Surya Namaskara tutorial on YouTube.', 'en');
+    const suryaSession = createDemoSessionForTask(suryaParsed.task!, 'real_browser', 'en');
+    const confirmTurn = resolveTaskContextTurn(
+      'Yes.',
+      suryaParsed.task!,
+      suryaSession,
+      null,
+      'real_browser',
+      'en',
+      'general'
+    );
+    assert.equal(confirmTurn.outcome, 'execute_pending');
+
+    const openedUrls: string[] = [];
+    if (confirmTurn.outcome === 'execute_pending') {
+      const prepped = prepareTaskForPlatform(confirmTurn.task, caps, 'en', 'real_browser');
+      const exec = await executeConfirmedTask(prepped.task, caps, 'en', {
+        openExternalUrl: (u) => {
+          openedUrls.push(u);
+          return true;
+        },
+        getCurrentPosition: async () => ({ error: 'unavailable' }),
+      });
+      assert.equal(openedUrls.length, 1);
+      assert.equal(
+        openedUrls[0],
+        'https://www.youtube.com/results?search_query=Surya%20Namaskara%20tutorial'
+      );
+      assert.ok(/search results|results for/i.test(exec.replyText));
+      assert.ok(!/now playing the video|started playing/i.test(exec.replyText));
+    }
+    passed += 1;
+  }
+
+  // Test 125: Pending Edit flow, conversation context preservation, and unrelated question escape
+  {
+    const waStart = parseNaturalCommand('Prepare a WhatsApp message for my brother.', 'en');
+    assert.equal(waStart.matched, true);
+    assert.equal(waStart.task?.executionStatus, 'needs_info');
+    assert.equal(waStart.task?.target, 'my brother');
+
+    const waSession = createDemoSessionForTask(waStart.task!, 'interactive_demo', 'en');
+    const waWithBody = resolveTaskContextTurn(
+      'Happy birthday, call me tonight.',
+      waStart.task!,
+      waSession,
+      null,
+      'interactive_demo',
+      'en',
+      'general'
+    );
+    assert.equal(waWithBody.outcome, 'advanced_needs_info');
+    if (waWithBody.outcome === 'advanced_needs_info') {
+      assert.equal(waWithBody.task.executionStatus, 'awaiting_confirmation');
+      assert.equal(waWithBody.task.target, 'my brother');
+      assert.equal(waWithBody.task.messageContent, 'Happy birthday, call me tonight.');
+
+      // Say "Edit" while awaiting confirmation -> keeps my brother, asks for new message
+      const editTurn = resolveTaskContextTurn(
+        'Edit',
+        waWithBody.task,
+        waWithBody.session,
+        null,
+        'interactive_demo',
+        'en',
+        'general'
+      );
+      assert.equal(editTurn.outcome, 'advanced_needs_info');
+      if (editTurn.outcome === 'advanced_needs_info') {
+        assert.equal(editTurn.task.executionStatus, 'needs_info');
+        assert.equal(editTurn.task.target, 'my brother');
+        assert.equal(editTurn.task.messageContent, null);
+
+        const updatedTurn = resolveTaskContextTurn(
+          'Call me at 8 PM.',
+          editTurn.task,
+          editTurn.session,
+          null,
+          'interactive_demo',
+          'en',
+          'general'
+        );
+        assert.equal(updatedTurn.outcome, 'advanced_needs_info');
+        if (updatedTurn.outcome === 'advanced_needs_info') {
+          assert.equal(updatedTurn.task.executionStatus, 'awaiting_confirmation');
+          assert.equal(updatedTurn.task.messageContent, 'Call me at 8 PM.');
+        }
+      }
+
+      // Unrelated question while awaiting confirmation must escape rather than stay trapped reprompting
+      const unrelatedTurn = resolveTaskContextTurn(
+        'Who are you?',
+        waWithBody.task,
+        waWithBody.session,
+        null,
+        'interactive_demo',
+        'en',
+        'general'
+      );
+      assert.equal(unrelatedTurn.outcome, 'pass_to_new_command');
+      if (unrelatedTurn.outcome === 'pass_to_new_command') {
+        assert.equal(unrelatedTurn.abandonedPrevious, true);
+      }
+    }
+
+    // Pending YouTube Edit -> prompts for new topic and updates search URL
+    const ytStart = parseNaturalCommand('Find a Surya Namaskara tutorial on YouTube.', 'en');
+    const ytEdit = resolveTaskContextTurn(
+      'Edit',
+      ytStart.task!,
+      createDemoSessionForTask(ytStart.task!, 'interactive_demo', 'en'),
+      null,
+      'interactive_demo',
+      'en',
+      'general'
+    );
+    assert.equal(ytEdit.outcome, 'advanced_needs_info');
+    if (ytEdit.outcome === 'advanced_needs_info') {
+      assert.equal(ytEdit.task.executionStatus, 'needs_info');
+      const ytUpdated = resolveTaskContextTurn(
+        'Pranayama breathing exercises',
+        ytEdit.task,
+        ytEdit.session,
+        null,
+        'interactive_demo',
+        'en',
+        'general'
+      );
+      assert.equal(ytUpdated.outcome, 'advanced_needs_info');
+      if (ytUpdated.outcome === 'advanced_needs_info') {
+        assert.equal(ytUpdated.task.executionStatus, 'awaiting_confirmation');
+        assert.equal(ytUpdated.task.target, 'Pranayama breathing exercises');
+        assert.equal(
+          ytUpdated.task.externalUrl,
+          'https://www.youtube.com/results?search_query=Pranayama%20breathing%20exercises'
+        );
+      }
+    }
+    passed += 1;
+  }
+
+  // Test 126: Hindi & Kannada natural phrasing & word-order variations
+  {
+    const waHi1 = parseNaturalCommand('मेरे भाई को व्हाट्सएप मैसेज भेजना है।', 'hi');
+    assert.equal(waHi1.matched, true);
+    assert.equal(waHi1.task?.application, 'WhatsApp');
+    assert.equal(waHi1.task?.target, 'भाई');
+    assert.equal(waHi1.task?.executionStatus, 'needs_info');
+
+    const waHi2 = parseNaturalCommand('मेरे भाई के लिए मैसेज तैयार करो।', 'hi');
+    assert.equal(waHi2.matched, true);
+    assert.equal(waHi2.task?.application, 'WhatsApp');
+    assert.equal(waHi2.task?.target, 'भाई');
+
+    const ytHi = parseNaturalCommand('यूट्यूब पर सूर्य नमस्कार का वीडियो दिखाओ।', 'hi');
+    assert.equal(ytHi.matched, true);
+    assert.equal(ytHi.task?.application, 'YouTube');
+    assert.equal(ytHi.task?.target, 'सूर्य नमस्कार');
+    assert.ok(ytHi.task?.externalUrl?.includes('youtube.com/results?search_query='));
+
+    const waKn1 = parseNaturalCommand('ನನ್ನ ಅಣ್ಣನಿಗೆ ವಾಟ್ಸಾಪ್ ಮೆಸೇಜ್ ಕಳುಹಿಸಬೇಕು.', 'kn');
+    assert.equal(waKn1.matched, true);
+    assert.equal(waKn1.task?.application, 'WhatsApp');
+    assert.equal(waKn1.task?.target, 'ಅಣ್ಣ');
+    assert.equal(waKn1.task?.executionStatus, 'needs_info');
+
+    const waKn2 = parseNaturalCommand('ನನ್ನ ಅಣ್ಣನಿಗೆ ಮೆಸೇಜ್ ತಯಾರಿಸಿ.', 'kn');
+    assert.equal(waKn2.matched, true);
+    assert.equal(waKn2.task?.application, 'WhatsApp');
+    assert.equal(waKn2.task?.target, 'ಅಣ್ಣ');
+
+    const ytKn = parseNaturalCommand('ಸೂರ್ಯ ನಮಸ್ಕಾರದ ವಿಡಿಯೋ ತೋರಿಸಿ.', 'kn');
+    assert.equal(ytKn.matched, true);
+    assert.equal(ytKn.task?.application, 'YouTube');
+    assert.equal(ytKn.task?.target, 'ಸೂರ್ಯ ನಮಸ್ಕಾರ');
+    assert.ok(ytKn.task?.externalUrl?.includes('youtube.com/results?search_query='));
+    passed += 1;
+  }
+
+  // Test 127: Low-confidence speech detection & language preference preservation
+  {
+    const lowKn = detectSpokenLanguage('uhh hmm', { currentUiLang: 'kn' });
+    assert.equal(lowKn.confidence, 'low');
+    assert.equal(lowKn.shouldClarify, true);
+    assert.equal(lowKn.uiResponseLang, 'kn');
+
+    const lowHi = detectSpokenLanguage('...', { currentUiLang: 'hi' });
+    assert.equal(lowHi.confidence, 'low');
+    assert.equal(lowHi.shouldClarify, true);
+    assert.equal(lowHi.uiResponseLang, 'hi');
+
+    assert.match(buildLowConfidenceClarificationReply('en'), /repeat it slowly|language selector/i);
+    assert.ok(buildLowConfidenceClarificationReply('hi').includes('भाषा'));
+    assert.ok(buildLowConfidenceClarificationReply('kn').includes('ಭಾಷೆ'));
+    passed += 1;
+  }
+
+  // Test 128: Personal name correction flows (full replacement, partial first name, split clause, rejection, spelling)
+  {
+    const firstEntry = parseVoiceInput('Tanisha Sunil.', 'fullName', EMPTY_APPLICATION_DATA);
+    assert.equal(firstEntry.type, 'field_updated');
+    if (firstEntry.type === 'field_updated') {
+      assert.equal(firstEntry.value, 'Tanisha Sunil');
+    }
+
+    const noMyName = parseVoiceInput(
+      'No, my name is Danisha Sunil.',
+      'fullName',
+      { ...EMPTY_APPLICATION_DATA, fullName: 'Tanisha Sunil' }
+    );
+    assert.equal(noMyName.type, 'field_updated');
+    if (noMyName.type === 'field_updated') {
+      assert.equal(noMyName.value, 'Danisha Sunil');
+    }
+
+    const changeFirst = parseVoiceInput(
+      'Change my first name to Danisha.',
+      'fullName',
+      { ...EMPTY_APPLICATION_DATA, fullName: 'Tanisha Sunil' }
+    );
+    assert.equal(changeFirst.type, 'field_updated');
+    if (changeFirst.type === 'field_updated') {
+      assert.equal(changeFirst.value, 'Danisha Sunil');
+    }
+
+    const splitClause = parseVoiceInput(
+      'The first name is Danisha and the second name is Sunil.',
+      'fullName',
+      EMPTY_APPLICATION_DATA
+    );
+    assert.equal(splitClause.type, 'field_updated');
+    if (splitClause.type === 'field_updated') {
+      assert.equal(splitClause.value, 'Danisha Sunil');
+    }
+
+    assert.equal(parseConfirmationReply('No, that is incorrect.'), 'reject');
+    const bareReject = parseVoiceInput(
+      'No, that is incorrect.',
+      'fullName',
+      { ...EMPTY_APPLICATION_DATA, fullName: 'Tanisha Sunil' }
+    );
+    assert.equal(bareReject.type, 'unrecognized');
+
+    assert.equal(parseConfirmationReply('Spell my name.'), 'spell');
+    passed += 1;
+  }
+
+  // Test 129: Unsupported native alarms (EN/HI/KN) & phone calls honestly distinguish browser demo vs Android
+  {
+    const caps = detectPlatformCapabilities({ userAgent: 'Chrome/126.0', platform: 'Win32' });
+    const alarmInputs: Array<{ text: string; lang: 'en' | 'hi' | 'kn' }> = [
+      { text: 'Set an alarm for 5 AM tomorrow.', lang: 'en' },
+      { text: 'कल सुबह पांच बजे का अलार्म लगाना है।', lang: 'hi' },
+      { text: 'ನಾಳೆ ಬೆಳಗ್ಗೆ ಐದು ಗಂಟೆಗೆ ಅಲಾರಂ ಇಡಬೇಕು.', lang: 'kn' },
+    ];
+
+    for (const item of alarmInputs) {
+      const parsed = parseNaturalCommand(item.text, item.lang);
+      assert.equal(parsed.matched, true, `Should match alarm request: ${item.text}`);
+      assert.equal(parsed.task?.action, 'set_alarm');
+      assert.equal(parsed.task?.executionStatus, 'unavailable_on_web');
+      assert.ok(
+        /Android|Calendar|कैलेंडर|ಕ್ಯಾಲೆಂಡರ್/i.test(parsed.replyText),
+        `Expected honest Android/Calendar alternative explanation, got: ${parsed.replyText}`
+      );
+
+      // Even if passed into runDemoExecution, never fake-complete an alarm
+      const exec = await runDemoExecution(parsed.task!, 'interactive_demo', caps, item.lang);
+      assert.equal(exec.task.executionStatus, 'unavailable_on_web');
+      assert.equal(exec.session.status, 'failed');
+    }
+
+    const callParsed = parseNaturalCommand('Make a phone call.', 'en');
+    assert.equal(callParsed.matched, true);
+    assert.equal(callParsed.task?.action, 'make_call');
+    assert.equal(callParsed.task?.executionStatus, 'unavailable_on_web');
+    assert.match(callParsed.replyText, /Android/i);
+    passed += 1;
+  }
+
+  // Test 130: Exact regression reproduction — WhatsApp awaiting_confirmation replaced by Kannada alarm
+  {
+    const caps = detectPlatformCapabilities({ userAgent: 'Chrome/126.0', platform: 'Win32' });
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowIso = formatIsoDate(tomorrow);
+
+    // Turn 1: Prepare WhatsApp message for brother
+    const startCmd = parseNaturalCommand('Can you prepare a WhatsApp message for my brother?', 'en');
+    assert.equal(startCmd.matched, true);
+    assert.equal(startCmd.task?.intent, 'messaging');
+    assert.equal(startCmd.task?.executionStatus, 'needs_info');
+    let activeTask = startCmd.task!;
+    let demoSession = createDemoSessionForTask(activeTask, 'interactive_demo', 'en');
+
+    // Turn 2: Provide message body -> WhatsApp enters awaiting_confirmation
+    const msgTurn = resolveTaskContextTurn(
+      'kya aap mere liye ek packet chips Le sakte hain',
+      activeTask,
+      demoSession,
+      null,
+      'interactive_demo',
+      'en',
+      'general'
+    );
+    assert.equal(msgTurn.outcome, 'advanced_needs_info');
+    if (msgTurn.outcome === 'advanced_needs_info') {
+      activeTask = prepareTaskForPlatform(msgTurn.task, caps, 'en', 'interactive_demo').task;
+      demoSession = createDemoSessionForTask(activeTask, 'interactive_demo', 'en');
+    }
+    assert.equal(activeTask.intent, 'messaging');
+    assert.equal(activeTask.target, 'my brother');
+    assert.equal(activeTask.messageContent, 'kya aap mere liye ek packet chips Le sakte hain');
+    assert.equal(activeTask.executionStatus, 'awaiting_confirmation');
+    assert.equal(demoSession.status, 'waiting_for_confirmation');
+
+    // Turn 3: Kannada alarm command arrives while WhatsApp is awaiting confirmation
+    const alarmUtterance = 'ನೀವು ನನಗೆ ನಾಳೆ 5:00 ಗಂಟೆಗೆ ಅಲರಾಂ ಇಡಿರಿ';
+    const ctxTurn = resolveTaskContextTurn(
+      alarmUtterance,
+      activeTask,
+      demoSession,
+      null,
+      'interactive_demo',
+      'kn',
+      'general'
+    );
+    assert.equal(ctxTurn.outcome, 'pass_to_new_command');
+    if (ctxTurn.outcome === 'pass_to_new_command') {
+      assert.equal(ctxTurn.abandonedPrevious, true);
+    }
+
+    const pendingEval = evaluatePendingTaskTurn(
+      alarmUtterance,
+      activeTask,
+      demoSession,
+      'interactive_demo',
+      'kn'
+    );
+    assert.equal(pendingEval.handled, false);
+    assert.equal(pendingEval.action, 'none');
+
+    // Parse & replace active task with alarm
+    const alarmCmd = parseNaturalCommand(alarmUtterance, 'kn');
+    assert.equal(alarmCmd.matched, true);
+    assert.ok(alarmCmd.task);
+    const preparedAlarm = prepareTaskForPlatform(
+      alarmCmd.task!,
+      caps,
+      'kn',
+      'interactive_demo'
+    ).task;
+
+    assert.equal(preparedAlarm.semanticIntent, 'SET_ALARM');
+    assert.equal(preparedAlarm.action, 'set_alarm');
+    assert.equal(preparedAlarm.application, 'Clock / Alarm');
+    assert.equal(preparedAlarm.executionStatus, 'unavailable_on_web');
+    assert.equal(preparedAlarm.messageContent, null);
+    assert.equal(preparedAlarm.recipient, undefined);
+    assert.equal(preparedAlarm.alarmDraft?.time, '05:00');
+    assert.equal(preparedAlarm.alarmDraft?.date, tomorrowIso);
+    assert.equal(preparedAlarm.alarmDraft?.dateLabel, 'tomorrow');
+    assert.equal(preparedAlarm.alarmDraft?.period, 'morning');
+    assert.ok(
+      /ಕ್ಯಾಲೆಂಡರ್|Android/i.test(alarmCmd.replyText),
+      `Expected honest Kannada explanation + Calendar alternative, got: ${alarmCmd.replyText}`
+    );
+
+    // Demo session helper must never report preparing_application or WhatsApp state for unavailable_on_web
+    const alarmSession = createDemoSessionForTask(preparedAlarm, 'interactive_demo', 'kn');
+    assert.equal(alarmSession.status, 'failed');
+    assert.equal(alarmSession.appName, 'Clock / Alarm');
+    assert.equal(alarmSession.payload.whatsAppState, undefined);
+    passed += 1;
+  }
+
+  // Test 131: All natural Kannada, Hindi, and English alarm & wake-up variants extract SET_ALARM cleanly
+  {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowIso = formatIsoDate(tomorrow);
+
+    const cases: Array<{
+      text: string;
+      lang: 'en' | 'hi' | 'kn';
+      expectedTime: string | null;
+      expectedDate: string | null;
+      expectedPeriod: 'morning' | 'afternoon' | 'evening' | 'night' | null;
+    }> = [
+      {
+        text: 'ನೀವು ನನಗೆ ನಾಳೆ 5:00 ಗಂಟೆಗೆ ಅಲರಾಂ ಇಡಿರಿ',
+        lang: 'kn',
+        expectedTime: '05:00',
+        expectedDate: tomorrowIso,
+        expectedPeriod: 'morning',
+      },
+      {
+        text: 'ನಾಳೆ ಬೆಳಗ್ಗೆ ಐದು ಗಂಟೆಗೆ ಅಲಾರಂ ಇಡಿ',
+        lang: 'kn',
+        expectedTime: '05:00',
+        expectedDate: tomorrowIso,
+        expectedPeriod: 'morning',
+      },
+      {
+        text: 'ನನಗೆ ಬೆಳಗ್ಗೆ 5 ಗಂಟೆಗೆ ಅಲಾರಂ ಬೇಕು',
+        lang: 'kn',
+        expectedTime: '05:00',
+        expectedDate: null,
+        expectedPeriod: 'morning',
+      },
+      {
+        text: 'ನಾಳೆ ಐದು ಗಂಟೆಗೆ ನನ್ನನ್ನು ಎಬ್ಬಿಸಿ',
+        lang: 'kn',
+        expectedTime: '05:00',
+        expectedDate: tomorrowIso,
+        expectedPeriod: 'morning',
+      },
+      {
+        text: 'ಅಲಾರಂ ಸೆಟ್ ಮಾಡಿ',
+        lang: 'kn',
+        expectedTime: null,
+        expectedDate: null,
+        expectedPeriod: null,
+      },
+      {
+        text: 'कल सुबह 5 बजे अलार्म लगाओ',
+        lang: 'hi',
+        expectedTime: '05:00',
+        expectedDate: tomorrowIso,
+        expectedPeriod: 'morning',
+      },
+      {
+        text: 'कल सुबह पांच बजे जगा दो',
+        lang: 'hi',
+        expectedTime: '05:00',
+        expectedDate: tomorrowIso,
+        expectedPeriod: 'morning',
+      },
+      {
+        text: 'Set an alarm for tomorrow at 5:00 AM',
+        lang: 'en',
+        expectedTime: '05:00',
+        expectedDate: tomorrowIso,
+        expectedPeriod: 'morning',
+      },
+      {
+        text: 'Wake me up tomorrow at 5 AM',
+        lang: 'en',
+        expectedTime: '05:00',
+        expectedDate: tomorrowIso,
+        expectedPeriod: 'morning',
+      },
+    ];
+
+    for (const c of cases) {
+      const parsed = parseNaturalCommand(c.text, c.lang);
+      assert.equal(parsed.matched, true, `Expected match for: ${c.text}`);
+      assert.equal(parsed.task?.semanticIntent, 'SET_ALARM', `Expected SET_ALARM for: ${c.text}`);
+      assert.equal(parsed.task?.action, 'set_alarm');
+      assert.equal(parsed.task?.executionStatus, 'unavailable_on_web');
+      assert.notEqual(parsed.task?.intent, 'messaging');
+      assert.notEqual(parsed.task?.intent, 'application_task');
+      assert.equal(parsed.task?.alarmDraft?.time, c.expectedTime, `Time mismatch for: ${c.text}`);
+      assert.equal(parsed.task?.alarmDraft?.date, c.expectedDate, `Date mismatch for: ${c.text}`);
+      assert.equal(parsed.task?.alarmDraft?.period, c.expectedPeriod, `Period mismatch for: ${c.text}`);
+    }
+    passed += 1;
+  }
+
+  // Test 132: YouTube, Maps, Calculator & multilingual new commands supersede pending WhatsApp (never hijacked as confirmation)
+  {
+    const caps = detectPlatformCapabilities({ userAgent: 'Chrome/126.0', platform: 'Win32' });
+    const waTask = prepareTaskForPlatform(
+      parseNaturalCommand('Send a WhatsApp message to my brother saying Bring chips', 'en').task!,
+      caps,
+      'en',
+      'interactive_demo'
+    ).task;
+    const waSession = createDemoSessionForTask(waTask, 'interactive_demo', 'en');
+    assert.equal(waTask.executionStatus, 'awaiting_confirmation');
+
+    const interruptingCommands: Array<{ text: string; lang: 'en' | 'hi' | 'kn'; expectedApp: string }> = [
+      { text: 'Please open YouTube.', lang: 'en', expectedApp: 'YouTube' },
+      { text: 'Can you open a yoga video showing how to perform Surya Namaskara?', lang: 'en', expectedApp: 'YouTube' },
+      { text: 'यूट्यूब खोल दो', lang: 'hi', expectedApp: 'YouTube' },
+      { text: 'ಗೂಗಲ್ ಮ್ಯಾಪ್ಸ್ ತೆರೆಯಿರಿ', lang: 'kn', expectedApp: 'Google Maps' },
+      { text: 'Calculate 250 + 350', lang: 'en', expectedApp: 'Calculator' },
+      { text: 'ಸರಿ, ನಾಳೆ 5 ಗಂಟೆಗೆ ಅಲರಾಂ ಇಡಿ', lang: 'kn', expectedApp: 'Clock / Alarm' },
+      { text: 'No, open YouTube', lang: 'en', expectedApp: 'YouTube' },
+    ];
+
+    for (const item of interruptingCommands) {
+      assert.equal(
+        classifyPendingConfirmationReply(item.text),
+        null,
+        `Confirmation classifier must NOT hijack: ${item.text}`
+      );
+      const turn = resolveTaskContextTurn(
+        item.text,
+        waTask,
+        waSession,
+        null,
+        'interactive_demo',
+        item.lang,
+        'general'
+      );
+      assert.equal(turn.outcome, 'pass_to_new_command', `Expected task replacement for: ${item.text}`);
+      if (turn.outcome === 'pass_to_new_command') {
+        assert.equal(turn.abandonedPrevious, true);
+      }
+      const parsed = parseNaturalCommand(item.text, item.lang);
+      assert.equal(parsed.matched, true, `Expected new command match for: ${item.text}`);
+      assert.equal(parsed.task?.application, item.expectedApp, `Expected app ${item.expectedApp} for: ${item.text}`);
+    }
+    passed += 1;
+  }
+
+  // Test 133: Explicit Yes / No confirmations still execute or cancel pending WhatsApp cleanly (EN / HI / KN)
+  {
+    const caps = detectPlatformCapabilities({ userAgent: 'Chrome/126.0', platform: 'Win32' });
+    const waTask = prepareTaskForPlatform(
+      parseNaturalCommand('Send a WhatsApp message to my brother saying Bring chips', 'en').task!,
+      caps,
+      'en',
+      'interactive_demo'
+    ).task;
+    const waSession = createDemoSessionForTask(waTask, 'interactive_demo', 'en');
+
+    for (const yesReply of ['Yes', 'Yes, please', 'ಹೌದು', 'हाँ']) {
+      const turn = resolveTaskContextTurn(
+        yesReply,
+        waTask,
+        waSession,
+        null,
+        'interactive_demo',
+        'en',
+        'general'
+      );
+      assert.equal(turn.outcome, 'execute_pending', `Expected execute_pending for "${yesReply}"`);
+    }
+
+    for (const noReply of ['No', 'Cancel', 'ಬೇಡ', 'नहीं']) {
+      const turn = resolveTaskContextTurn(
+        noReply,
+        waTask,
+        waSession,
+        null,
+        'interactive_demo',
+        'en',
+        'general'
+      );
+      assert.equal(turn.outcome, 'cancelled_pending', `Expected cancelled_pending for "${noReply}"`);
+    }
+    passed += 1;
+  }
+
+  // Test 134: Genuine clarification answers preserve active needs_info task slots while new commands abandon them
+  {
+    // 1. WhatsApp recipient -> message slot preserved
+    const step1 = parseNaturalCommand('Prepare a WhatsApp message', 'en').task!;
+    assert.equal(step1.executionStatus, 'needs_info');
+    const step2 = resolveTaskContextTurn(
+      'My brother',
+      step1,
+      createDemoSessionForTask(step1, 'interactive_demo', 'en'),
+      null,
+      'interactive_demo',
+      'en',
+      'general'
+    );
+    assert.equal(step2.outcome, 'advanced_needs_info');
+    if (step2.outcome === 'advanced_needs_info') {
+      assert.equal(step2.task.intent, 'messaging');
+      assert.equal(step2.task.target, 'My brother');
+      assert.equal(step2.task.executionStatus, 'needs_info');
+
+      // 2. Providing message body keeps recipient & moves to awaiting_confirmation
+      const step3 = resolveTaskContextTurn(
+        'Please pick up a packet of chips',
+        step2.task,
+        step2.session,
+        null,
+        'interactive_demo',
+        'en',
+        'general'
+      );
+      assert.equal(step3.outcome, 'advanced_needs_info');
+      if (step3.outcome === 'advanced_needs_info') {
+        assert.equal(step3.task.target, 'My brother');
+        assert.equal(step3.task.messageContent, 'Please pick up a packet of chips');
+        assert.equal(step3.task.executionStatus, 'awaiting_confirmation');
+      }
+    }
+
+    // 3. Calendar clarification keeps Calendar task, while switching to alarm abandons it
+    const calAsk = parseNaturalCommand('Schedule my doctor appointment for tomorrow', 'en').task!;
+    assert.equal(calAsk.application, 'Calendar');
+    assert.equal(calAsk.executionStatus, 'needs_info');
+    const calTimeReply = resolveTaskContextTurn(
+      '10 AM',
+      calAsk,
+      createDemoSessionForTask(calAsk, 'interactive_demo', 'en'),
+      null,
+      'interactive_demo',
+      'en',
+      'general'
+    );
+    assert.equal(calTimeReply.outcome, 'advanced_needs_info');
+    if (calTimeReply.outcome === 'advanced_needs_info') {
+      assert.equal(calTimeReply.task.application, 'Calendar');
+      assert.equal(calTimeReply.task.calendarDraft?.time, '10:00 AM');
+      assert.equal(calTimeReply.task.executionStatus, 'ready');
+    }
+
+    const switchDuringNeedsInfo = resolveTaskContextTurn(
+      'ನಾಳೆ ಬೆಳಗ್ಗೆ ಐದು ಗಂಟೆಗೆ ಅಲಾರಂ ಇಡಿ',
+      calAsk,
+      createDemoSessionForTask(calAsk, 'interactive_demo', 'en'),
+      null,
+      'interactive_demo',
+      'kn',
+      'general'
+    );
+    assert.equal(switchDuringNeedsInfo.outcome, 'pass_to_new_command');
+    passed += 1;
+  }
+
+  console.log(`SAHAAYA TEST SUITE PASSED: ${passed}/134 scenarios verified.`);
 }
 
 runTests().catch((err) => {

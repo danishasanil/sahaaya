@@ -57,9 +57,14 @@ import {
   prepareTaskForPlatform,
 } from './utils/platformExecutor';
 import {
+  isLikelyUnrelatedQuestion,
   LastTaskContext,
   resolveTaskContextTurn,
 } from './utils/conversationTaskManager';
+import {
+  buildLowConfidenceClarificationReply,
+  detectSpokenLanguage,
+} from './utils/pronunciationAndLanguageEngine';
 
 const STORAGE_KEY = 'sahaaya_prototype_state_v1';
 
@@ -729,7 +734,50 @@ export default function App() {
             return;
           }
 
-          if (curPending.mode === 'confirm') {
+          if (curPending.mode === 'confirm' || curPending.mode === 'edit') {
+            const pendingDataContext: ApplicationData = {
+              ...curData,
+              [curPending.field]: curPending.value,
+            };
+
+            if (curPending.mode === 'edit') {
+              const editReplacement = parseVoiceInput(
+                cleaned,
+                curPending.field,
+                pendingDataContext
+              );
+              if (
+                editReplacement.type === 'field_updated' &&
+                editReplacement.field === curPending.field
+              ) {
+                const err = validateField(
+                  curPending.field,
+                  editReplacement.value,
+                  curLang
+                );
+                if (err) {
+                  const clarifyMsg = `${err} ${t.fields[curPending.field].example}`;
+                  appendMessage('assistant', clarifyMsg, curPending.field);
+                  speech.speak(clarifyMsg, curLang);
+                } else {
+                  askForConfirmation(
+                    curPending.field,
+                    editReplacement.value,
+                    curLang
+                  );
+                }
+                setIsProcessing(false);
+                return;
+              }
+              const retryEditMsg = t.assistant.confirmCard.editPrompt(
+                t.fields[curPending.field].label
+              );
+              appendMessage('assistant', retryEditMsg, curPending.field);
+              speech.speak(retryEditMsg, curLang);
+              setIsProcessing(false);
+              return;
+            }
+
             const replyIntent = parseConfirmationReply(cleaned);
             if (replyIntent === 'confirm') {
               commitConfirmedField(
@@ -755,7 +803,11 @@ export default function App() {
               return;
             }
             if (replyIntent === 'edit' || replyIntent === 'reject') {
-              const replacement = parseVoiceInput(cleaned, curPending.field, curData);
+              const replacement = parseVoiceInput(
+                cleaned,
+                curPending.field,
+                pendingDataContext
+              );
               if (
                 replacement.type === 'field_updated' &&
                 replacement.field === curPending.field
@@ -782,7 +834,11 @@ export default function App() {
             }
 
             // Allow speaking a replacement value directly while confirming
-            const replacement = parseVoiceInput(cleaned, curPending.field, curData);
+            const replacement = parseVoiceInput(
+              cleaned,
+              curPending.field,
+              pendingDataContext
+            );
             if (
               replacement.type === 'field_updated' &&
               replacement.field === curPending.field
@@ -833,9 +889,16 @@ export default function App() {
             return;
           }
 
-          // Treat city/area reply as refining the search unless user gave a completely different command
+          // Treat short city/area reply as refining the search unless user gave a command or unrelated question
           const maybeNewCmd = parseNaturalCommand(cleaned, curLang);
-          if (!maybeNewCmd.matched) {
+          const wordCount = cleaned.split(/\s+/).filter(Boolean).length;
+          const looksLikePlaceReply =
+            !maybeNewCmd.matched &&
+            !isLikelyUnrelatedQuestion(cleaned) &&
+            wordCount >= 1 &&
+            wordCount <= 6 &&
+            !/^(?:i don'?t know|not sure|never mind|tell me|nothing)$/i.test(cleaned);
+          if (looksLikePlaceReply) {
             const baseQuery = (curTask.target || 'hospitals')
               .replace(/\b(near me|nearby|closest)\b/gi, '')
               .trim();
@@ -886,10 +949,12 @@ export default function App() {
           const descriptor = DEMO_APP_REGISTRY[appId];
 
           // In Interactive Demo Mode, native-only apps (Camera, Settings, Phone, Calculator, Calendar when ready) launch smoothly into animated demo
+          // Never auto-run tasks already marked unavailable_on_web (e.g. native Clock / Alarm or cellular Phone Call)
           if (
             curExecMode === 'interactive_demo' &&
             cmdResult.task.intent === 'app_launch' &&
             cmdResult.task.executionStatus !== 'needs_info' &&
+            cmdResult.task.executionStatus !== 'unavailable_on_web' &&
             !descriptor.supportsRealBrowser &&
             !descriptor.requiresSensitiveConfirmation &&
             cmdResult.task.application
@@ -906,7 +971,10 @@ export default function App() {
           );
           setActiveTask(prepared.task);
 
-          if (prepared.task.intent !== 'general_conversation') {
+          if (
+            prepared.task.intent !== 'general_conversation' &&
+            prepared.task.executionStatus !== 'unavailable_on_web'
+          ) {
             setDemoSession(
               createDemoSessionForTask(prepared.task, curExecMode, curLang, {
                 applicationData: curData,
@@ -1031,7 +1099,20 @@ export default function App() {
         clearDemoTimers();
         setActiveTask(null);
         setDemoSession(null);
-        const generalReply = buildGeneralFallbackResponse(cleaned, curLang);
+        const langDetect = detectSpokenLanguage(cleaned, { currentUiLang: curLang });
+        const unsupportedRegionalScript =
+          langDetect.confidence === 'high' &&
+          !['en-IN', 'hi-IN', 'kn-IN'].includes(langDetect.detectedLanguageId) &&
+          /[^\x00-\x7F]/.test(cleaned);
+        const generalReply = langDetect.shouldClarify
+          ? buildLowConfidenceClarificationReply(curLang)
+          : unsupportedRegionalScript
+            ? curLang === 'hi'
+              ? `मुझे "${cleaned}" सुनाई दिया, लेकिन सहाय अभी केवल अंग्रेज़ी, हिंदी और कन्नड़ समझता है। कृपया इनमें से किसी भाषा में फिर बोलें या ऊपर से अपनी भाषा चुनें।`
+              : curLang === 'kn'
+                ? `ನನಗೆ "${cleaned}" ಕೇಳಿಸಿತು, ಆದರೆ ಸಹಾಯ ಸದ್ಯಕ್ಕೆ ಇಂಗ್ಲಿಷ್, ಹಿಂದಿ ಮತ್ತು ಕನ್ನಡವನ್ನು ಮಾತ್ರ ಬೆಂಬಲಿಸುತ್ತದೆ. ದಯವಿಟ್ಟು ಈ ಭಾಷೆಗಳಲ್ಲಿ ಒಂದರಲ್ಲಿ ಮತ್ತೆ ಹೇಳಿ ಅಥವಾ ಮೇಲಿನಿಂದ ಭಾಷೆಯನ್ನು ಆಯ್ಕೆಮಾಡಿ.`
+                : `I heard "${cleaned}", but Sahaaya currently supports English, Hindi, and Kannada without guessing other languages. Please repeat in English, Hindi, or Kannada, or choose your preferred language above.`
+            : buildGeneralFallbackResponse(cleaned, curLang);
         appendMessage('assistant', generalReply);
         speech.speak(generalReply, curLang);
         setIsProcessing(false);

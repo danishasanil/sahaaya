@@ -203,20 +203,67 @@ function toTitleCase(text: string): string {
 
 function parseFieldValue(
   field: ApplicationFieldKey,
-  rawText: string
+  rawText: string,
+  currentData?: ApplicationData
 ): string | null {
   const normalized = normalizeIndicNumerals(rawText).trim();
   if (!normalized) return null;
 
   switch (field) {
     case 'fullName': {
+      // 1. Handle combined "The first name is X and the second/last name is Y"
+      const firstAndLastMatch = normalized.match(
+        /(?:the\s+|my\s+)?first\s+name\s+(?:is\s+)?([a-zA-Z\u0900-\u097F\u0C80-\u0CFF'-]+(?:\.[a-zA-Z])?)\s*(?:,?\s*(?:and\s+)?)(?:the\s+|my\s+)?(?:second|last|sur)\s*name\s+(?:is\s+)?([a-zA-Z\u0900-\u097F\u0C80-\u0CFF'-]+(?:\.[a-zA-Z])?)[.।!?]*$/i
+      );
+      if (firstAndLastMatch) {
+        const firstPart = firstAndLastMatch[1].replace(/[.।!?]+$/, '').trim();
+        const lastPart = firstAndLastMatch[2].replace(/[.।!?]+$/, '').trim();
+        const combined = `${firstPart} ${lastPart}`.trim();
+        return /^[a-zA-Z\s.'-]+$/.test(combined) ? toTitleCase(combined) : combined;
+      }
+
+      // 2. Handle partial "Change my first name to X" / "My first name is X"
+      const firstNameOnlyMatch = normalized.match(
+        /^(?:(?:no|nope|sorry|actually|wait)[,.\s]+)*(?:(?:change|update|edit|fix|correct|set)\s+)?(?:the\s+|my\s+)?first\s+name\s+(?:to|is|as)\s+([a-zA-Z\u0900-\u097F\u0C80-\u0CFF.'-]+?)[.।!?]*$/i
+      );
+      if (firstNameOnlyMatch) {
+        const newFirstRaw = firstNameOnlyMatch[1].replace(/[.।!?]+$/, '').trim();
+        const newFirst = /^[a-zA-Z.'-]+$/.test(newFirstRaw) ? toTitleCase(newFirstRaw) : newFirstRaw;
+        const existingParts = (currentData?.fullName || '').trim().split(/\s+/).filter(Boolean);
+        if (existingParts.length >= 2) {
+          return [newFirst, ...existingParts.slice(1)].join(' ');
+        }
+        return newFirst;
+      }
+
+      // 3. Handle partial "Change my second/last/surname to Y"
+      const lastNameOnlyMatch = normalized.match(
+        /^(?:(?:no|nope|sorry|actually|wait)[,.\s]+)*(?:(?:change|update|edit|fix|correct|set)\s+)?(?:the\s+|my\s+)?(?:(?:second|last)\s+name|surname)\s+(?:to|is|as)\s+([a-zA-Z\u0900-\u097F\u0C80-\u0CFF.'-]+?)[.।!?]*$/i
+      );
+      if (lastNameOnlyMatch) {
+        const newLastRaw = lastNameOnlyMatch[1].replace(/[.।!?]+$/, '').trim();
+        const newLast = /^[a-zA-Z.'-]+$/.test(newLastRaw) ? toTitleCase(newLastRaw) : newLastRaw;
+        const existingParts = (currentData?.fullName || '').trim().split(/\s+/).filter(Boolean);
+        if (existingParts.length >= 2) {
+          return [...existingParts.slice(0, -1), newLast].join(' ');
+        }
+        if (existingParts.length === 1) {
+          return `${existingParts[0]} ${newLast}`;
+        }
+        return newLast;
+      }
+
       let stripped = normalized
         .replace(
-          /^(?:(?:no|nope|sorry|actually|wait)[,.\s]+)*(?:(?:that(?:'s| is)|it(?:'s| is)|this is)\s+)?(?:not\s+correct|not\s+right|incorrect|wrong)[,.\s]*/i,
+          /^(?:(?:no|nope|sorry|actually|wait)[,.\s]+)+/i,
           ''
         )
         .replace(
-          /^(?:let\s+me\s+correct\s+(?:that|it|my\s+name)|please\s+correct\s+(?:that|it|my\s+name)|change\s+(?:my\s+|the\s+)?name\s+(?:to|is))[,.\s]*/i,
+          /^(?:(?:that(?:'s| is)|it(?:'s| is)|this is)\s+)?(?:not\s+correct|not\s+right|incorrect|wrong)[,.\s]*/i,
+          ''
+        )
+        .replace(
+          /^(?:let\s+me\s+correct\s+(?:that|it|my\s+name)|please\s+correct\s+(?:that|it|my\s+name)|(?:please\s+)?change\s+(?:my\s+|the\s+)?(?:full\s+)?name\s+(?:to|is|as))[,.\s]*/i,
           ''
         )
         .replace(
@@ -226,9 +273,14 @@ function parseFieldValue(
         .replace(/^(मेरा नाम|मेरा पूरा नाम|मैं)\s+/i, '')
         .replace(/\s+(है|हूँ)$/i, '')
         .replace(/^(ನನ್ನ ಪೂರ್ಣ ಹೆಸರು|ನನ್ನ ಹೆಸರು|ನಾನು)\s+/i, '')
-        .replace(/[.।]+$/, '')
+        .replace(/[.।!?]+$/, '')
         .trim();
-      if (/^(?:not\s+correct|not\s+right|incorrect|wrong|correct)$/i.test(stripped)) {
+      if (
+        !stripped ||
+        /^(?:not\s+correct|not\s+right|incorrect|wrong|correct|right|that|that is|it is|thanks|thank you|cancel|stop|never mind|leave it|spell|spell my name)$/i.test(
+          stripped
+        )
+      ) {
         return null;
       }
       if (stripped.length < 2) return null;
@@ -395,7 +447,7 @@ function parseFieldValue(
 function detectExplicitFieldCorrection(text: string): ApplicationFieldKey | null {
   const lower = text.toLowerCase();
   if (
-    /\b(change|update|edit|fix)\b.*?\b(?:my\s+|the\s+)?(?:full\s+)?name\b|\bcorrect\s+(?:my\s+|the\s+)?(?:full\s+)?name\b|नाम.*बदल|ಹೆಸರು.*ಬದಲ/.test(
+    /\b(change|update|edit|fix)\b.*?\b(?:(?:my|the)\s+)?(?:(?:full|first|second|middle|last|sur)\s+)?name\b|\b(?:change|update|edit|fix)\b.*?\bsurname\b|\bcorrect\s+(?:my\s+|the\s+)?(?:(?:full|first|second|last)\s+)?name\b|नाम.*बदल|ಹೆಸರು.*ಬದಲ/.test(
       lower
     )
   ) {
@@ -468,7 +520,7 @@ export type VoiceParseOutcome =
 export function parseVoiceInput(
   rawTranscript: string,
   activeField: ApplicationFieldKey,
-  _currentData: ApplicationData
+  currentData: ApplicationData
 ): VoiceParseOutcome {
   const text = rawTranscript.trim();
   const lower = text.toLowerCase();
@@ -496,7 +548,7 @@ export function parseVoiceInput(
   // 2. Check if user explicitly wants to correct another field
   const correctionField = detectExplicitFieldCorrection(text);
   const targetField = correctionField || activeField;
-  const parsedValue = parseFieldValue(targetField, text);
+  const parsedValue = parseFieldValue(targetField, text, currentData);
 
   if (parsedValue !== null) {
     return {

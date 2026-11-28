@@ -452,6 +452,22 @@ export async function executeConfirmedTask(
   lang: LanguageCode = 'en',
   adapter: PlatformExecutionAdapter = createBrowserExecutionAdapter()
 ): Promise<{ task: AssistantTask; replyText: string }> {
+  // Never execute native system alarms in browser mode
+  if (task.action === 'set_alarm') {
+    return {
+      task: {
+        ...task,
+        executionStatus: 'unavailable_on_web',
+      },
+      replyText:
+        lang === 'hi'
+          ? 'यह वेब ब्राउज़र डेमो आपके फ़ोन का असली सिस्टम अलार्म सीधे सेट नहीं कर सकता (इसके लिए भविष्य में Android डिवाइस एकीकरण की आवश्यकता होगी)। विकल्प के रूप में, आप चाहें तो मैं इसे सहाय के स्थानीय डेमो कैलेंडर में एक रिमाइंडर के रूप में जोड़ सकता हूँ।'
+          : lang === 'kn'
+            ? 'ಈ ವೆಬ್ ಬ್ರೌಸರ್ ಡೆಮೊ ನಿಮ್ಮ ಫೋನ್‌ನ ನಿಜವಾದ ಸಿಸ್ಟಮ್ ಅಲಾರಂ ಅನ್ನು ನೇರವಾಗಿ ಇಡಲು ಸಾಧ್ಯವಿಲ್ಲ (ಇದಕ್ಕೆ ಭವಿಷ್ಯದ Android ಸಾಧನ ಏಕೀಕರಣ ಅಗತ್ಯವಿದೆ). ಪರ್ಯಾಯವಾಗಿ, ನೀವು ಬಯಸಿದರೆ ನಾನು ಇದನ್ನು ಸಹಾಯದ ಸ್ಥಳೀಯ ಡೆಮೊ ಕ್ಯಾಲೆಂಡರ್‌ನಲ್ಲಿ ರಿಮೈಂಡರ್ ಆಗಿ ಸೇರಿಸಬಲ್ಲೆ.'
+            : 'This browser demo cannot directly set your phone’s system alarm—that requires future native Android Clock integration. As an alternative, I can add a local reminder in Sahaaya’s Demo Calendar if you would like, without setting a real phone alarm.',
+    };
+  }
+
   // 1. Open Website (YouTube, Google, Google Maps, WhatsApp Web, Chrome -> Google Search, Spotify)
   if (task.intent === 'app_launch') {
     const isYouTubeVideo =
@@ -561,8 +577,16 @@ export async function executeConfirmedTask(
           externalLabel: `Open "${query}" on YouTube`,
         },
         replyText: opened
-          ? `I opened YouTube search results for "${query}" in a new browser tab.`
-          : `Your browser blocked opening YouTube automatically. Please tap the button on screen.`,
+          ? lang === 'hi'
+            ? `मैंने नए ब्राउज़र टैब में YouTube पर "${query}" खोज परिणाम खोल दिए हैं।`
+            : lang === 'kn'
+              ? `ಹೊಸ ಬ್ರೌಸರ್ ಟ್ಯಾಬ್‌ನಲ್ಲಿ YouTube ನಲ್ಲಿ "${query}" ಹುಡುಕಾಟ ಫಲಿತಾಂಶಗಳನ್ನು ತೆರೆದಿದ್ದೇನೆ.`
+              : `I opened YouTube search results for "${query}" in a new browser tab.`
+          : lang === 'hi'
+            ? 'ब्राउज़र ने YouTube को अपने आप खुलने से रोका है। कृपया स्क्रीन पर दिए बटन को दबाएँ।'
+            : lang === 'kn'
+              ? 'ಬ್ರೌಸರ್ ಸ್ವಯಂಚಾಲಿತವಾಗಿ YouTube ತೆರೆಯುವುದನ್ನು ತಡೆದಿದೆ. ದಯವಿಟ್ಟು ಪರದೆಯ ಮೇಲಿನ ಬಟನ್ ಒತ್ತಿರಿ.'
+              : 'Your browser blocked opening YouTube automatically. Please tap the button on screen.',
       };
     }
 

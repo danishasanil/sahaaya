@@ -913,18 +913,68 @@ export function VoiceAssistantScreen({
                       {t.assistant.taskInspector.detectedTaskLabel}
                     </p>
                     <p className="text-[#493451] font-semibold mt-0.5">
-                      {t.assistant.taskInspector.categoryLabels[activeTask.intent]}
-                      {activeTask.application ? ` · ${activeTask.application}` : ''}
-                      {activeTask.target && activeTask.target !== activeTask.application
-                        ? ` (${activeTask.target})`
+                      {activeTask.semanticIntent
+                        ? `${activeTask.semanticIntent} · `
                         : ''}
+                      {t.assistant.taskInspector.categoryLabels[activeTask.intent]}
                     </p>
-                    {activeTask.messageContent && (
-                      <p className="text-xs text-[#5C5363] mt-1">
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 border-t border-[var(--sahaaya-border)] pt-2.5">
+                    <div>
+                      <p className="text-xs font-semibold text-[#5C5363]">
+                        {t.assistant.taskInspector.applicationLabel}
+                      </p>
+                      <p className="text-[#493451] font-semibold mt-0.5">
+                        {activeTask.application || 'Sahaaya'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-[#5C5363]">
+                        {t.assistant.taskInspector.requestedActionLabel}
+                      </p>
+                      <p className="text-[#302B33] font-medium mt-0.5">
+                        {activeTask.action === 'set_alarm'
+                          ? 'Set alarm'
+                          : activeTask.target && activeTask.target !== activeTask.application
+                            ? activeTask.target
+                            : activeTask.action.replace(/_/g, ' ')}
+                      </p>
+                    </div>
+                  </div>
+
+                  {activeTask.alarmDraft && (
+                    <div className="rounded-xl bg-[#F7F1E8] border border-[var(--sahaaya-border)] px-3 py-2 text-xs text-[#302B33] flex flex-wrap gap-x-4 gap-y-1">
+                      <span>
+                        <strong className="text-[#493451]">Time:</strong>{' '}
+                        {activeTask.alarmDraft.time || 'Not specified'}
+                      </span>
+                      <span>
+                        <strong className="text-[#493451]">Date:</strong>{' '}
+                        {activeTask.alarmDraft.dateLabel
+                          ? `${activeTask.alarmDraft.dateLabel}${
+                              activeTask.alarmDraft.date
+                                ? ` (${activeTask.alarmDraft.date})`
+                                : ''
+                            }`
+                          : activeTask.alarmDraft.date || 'Not specified'}
+                      </span>
+                      {activeTask.alarmDraft.period && (
+                        <span>
+                          <strong className="text-[#493451]">Period:</strong>{' '}
+                          {activeTask.alarmDraft.period}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {activeTask.intent === 'messaging' && activeTask.messageContent && (
+                    <div className="border-t border-[var(--sahaaya-border)] pt-2.5">
+                      <p className="text-xs text-[#5C5363]">
                         “{activeTask.messageContent}”
                       </p>
-                    )}
-                  </div>
+                    </div>
+                  )}
 
                   <div className="border-t border-[var(--sahaaya-border)] pt-2.5">
                     <p className="text-xs font-semibold text-[#5C5363]">

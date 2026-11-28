@@ -733,7 +733,7 @@ export function resolveTaskContextTurn(
   const editSourceTask =
     activeTask && resolveDemoAppId(activeTask) === 'whatsapp'
       ? activeTask
-      : lastContext && lastContext.session.appId === 'whatsapp'
+      : !activeTask && lastContext && lastContext.session.appId === 'whatsapp'
         ? lastContext.task
         : null;
   if (editSourceTask) {
@@ -785,6 +785,15 @@ export function resolveTaskContextTurn(
         task: pendingTurn.task,
         session: pendingTurn.session,
         replyText: pendingTurn.replyText,
+      };
+    }
+    if (pendingTurn.action === 'edit') {
+      return {
+        outcome: 'advanced_needs_info',
+        task: pendingTurn.task,
+        session: pendingTurn.session,
+        replyText: pendingTurn.replyText,
+        executeImmediately: false,
       };
     }
     return {
@@ -858,6 +867,6 @@ export function resolveTaskContextTurn(
 
   return {
     outcome: 'pass_to_new_command',
-    abandonedPrevious: false,
+    abandonedPrevious: Boolean(hasPendingOrNeedsInfo),
   };
 }
