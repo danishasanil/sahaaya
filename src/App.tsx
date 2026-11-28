@@ -755,6 +755,19 @@ export default function App() {
               return;
             }
             if (replyIntent === 'edit' || replyIntent === 'reject') {
+              const replacement = parseVoiceInput(cleaned, curPending.field, curData);
+              if (
+                replacement.type === 'field_updated' &&
+                replacement.field === curPending.field
+              ) {
+                const err = validateField(curPending.field, replacement.value, curLang);
+                if (!err) {
+                  askForConfirmation(curPending.field, replacement.value, curLang);
+                  setIsProcessing(false);
+                  return;
+                }
+              }
+
               setPendingConfirmation({
                 ...curPending,
                 mode: 'edit',
@@ -1040,6 +1053,10 @@ export default function App() {
   const navigateTo = useCallback(
     (screen: ScreenId) => {
       speech.endConversation();
+      if (screen === 'assistant' && stateRef.current.currentScreen !== 'assistant') {
+        setConversationMode('general');
+        setPendingConfirmation(null);
+      }
       setPreviousScreen(stateRef.current.currentScreen);
       setCurrentScreen(screen);
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1077,9 +1094,10 @@ export default function App() {
 
   const handleStartAssistantFromWelcome = useCallback(() => {
     const t = TRANSLATIONS[language];
+    setConversationMode('general');
+    setPendingConfirmation(null);
     if (messages.length <= 1) {
       const greeting = t.assistant.initialGreeting;
-      setConversationMode('general');
       setMessages([
         {
           id: `welcome-start-${Date.now()}`,
@@ -1106,12 +1124,12 @@ export default function App() {
   const handleSpeakSpecificField = useCallback(
     (field: ApplicationFieldKey) => {
       const t = TRANSLATIONS[language];
+      navigateTo('assistant');
       setConversationMode('welfare_form');
       setPendingConfirmation(null);
       setActiveField(field);
       const prompt = t.fields[field].voicePrompt;
       appendMessage('assistant', prompt, field);
-      navigateTo('assistant');
       speech.startConversationWithSpeech(prompt, language);
     },
     [appendMessage, language, navigateTo, speech]

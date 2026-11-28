@@ -44,16 +44,16 @@ const KNOWN_APPS: KnownAppDefinition[] = [
   { canonicalName: 'YouTube', patterns: [/\byoutube\b/i, /यूट्यूब/, /ಯೂಟ್ಯೂಬ್/] },
   { canonicalName: 'WhatsApp', patterns: [/\bwhatsapp\b/i, /\bwhats app\b/i, /व्हाट्सएप|व्हाट्सऐप/, /ವಾಟ್ಸಾಪ್/] },
   { canonicalName: 'Spotify', patterns: [/\bspotify\b/i, /स्पॉटिफ़ाई|स्पॉटिफाई/, /ಸ್ಪಾಟಿಫೈ/] },
-  { canonicalName: 'Google Maps', patterns: [/\bgoogle maps\b/i, /\bmaps\b/i, /गूगल मैप्स/, /ಮ್ಯಾಪ್ಸ್/] },
-  { canonicalName: 'Chrome', patterns: [/\bgoogle chrome\b/i, /\bchrome\b/i, /\bbrowser\b/i, /क्रोम/] },
+  { canonicalName: 'Google Maps', patterns: [/\bgoogle maps\b/i, /\bmaps\b/i, /गूगल मैप्स|मैप्स/, /ಗೂಗಲ್ ಮ್ಯಾಪ್ಸ್|ಮ್ಯಾಪ್ಸ್/] },
+  { canonicalName: 'Chrome', patterns: [/\bgoogle chrome\b/i, /\bchrome\b/i, /\bbrowser\b/i, /गूगल क्रोम|क्रोम/, /ಕ್ರೋಮ್/] },
   { canonicalName: 'Google', patterns: [/\bgoogle\b/i, /गूगल/, /ಗೂಗಲ್/] },
   { canonicalName: 'Camera', patterns: [/\bcamera\b/i, /कैमरा/, /ಕ್ಯಾಮೆರಾ/] },
   { canonicalName: 'Settings', patterns: [/\bsettings\b/i, /सेटिंग्स/, /ಸೆಟ್ಟಿಂಗ್/] },
-  { canonicalName: 'Phone', patterns: [/\bphone\b/i, /\bdialer\b/i, /फ़ोन/] },
-  { canonicalName: 'Messages', patterns: [/\bmessages\b/i, /\bsms\b/i] },
-  { canonicalName: 'Gallery', patterns: [/\bgallery\b/i, /\bphotos\b/i] },
+  { canonicalName: 'Phone', patterns: [/\bphone\b/i, /\bdialer\b/i, /फ़ोन|फोन/, /ಫೋನ್/] },
+  { canonicalName: 'Messages', patterns: [/\bmessages\b/i, /\bsms\b/i, /संदेश|मैसेज/, /ಸಂದೇಶ/] },
+  { canonicalName: 'Gallery', patterns: [/\bgallery\b/i, /\bphotos\b/i, /गैलरी/, /ಗ್ಯಾಲರಿ/] },
   { canonicalName: 'Calendar', patterns: [/\bcalendar\b/i, /कैलेंडर/, /ಕ್ಯಾಲೆಂಡರ್/] },
-  { canonicalName: 'Clock', patterns: [/\bclock\b/i, /\balarm\b/i] },
+  { canonicalName: 'Clock', patterns: [/\bclock\b/i, /\balarm\b/i, /घड़ी|अलार्म/, /ಗಡಿಯಾರ|ಅಲಾರ್ಮ್/] },
   { canonicalName: 'Calculator', patterns: [/\bcalculator\b/i, /कैलकुलेटर/, /ಕ್ಯಾಲ್ಕುಲೇಟರ್/] },
 ];
 
@@ -1740,10 +1740,14 @@ export function parseNaturalCommand(
     };
   }
 
-  // A. Application Launching Commands (Known Apps & Unknown Apps)
-  const launchMatch = commandCore.match(/^(?:open|launch|start)\s+(?:my\s+|the\s+)?(.+)$/i);
+  // A. Application Launching Commands (Known Apps & Unknown Apps, EN prefix + HI/KN SOV suffix)
+  const launchMatch =
+    commandCore.match(/^(?:open|launch|start)\s+(?:my\s+|the\s+)?(.+)$/i) ||
+    commandCore.match(
+      /^(.+?)\s+(?:खोलो|खोलें|खोलिए|शुरू\s*करो|चलाओ|ओपन\s*करो|ತೆರೆಯಿರಿ|ತೆರೆ|ಪ್ರಾರಂಭಿಸಿ|ಓಪನ್\s*ಮಾಡಿ)[.।!?]*$/i
+    );
   if (launchMatch) {
-    const requestedTarget = launchMatch[1].replace(/[.!?]+$/, '').trim();
+    const requestedTarget = launchMatch[1].replace(/[.।!?]+$/, '').trim();
     if (/^(?:an?\s+)?(?:application|app)$/i.test(requestedTarget)) {
       const task: AssistantTask = {
         id: createTaskId(),

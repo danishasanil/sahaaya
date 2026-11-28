@@ -1,4 +1,4 @@
-import { ArrowRight, FileText, Mic, ShieldCheck } from 'lucide-react';
+import { ArrowRight, FileText, Globe, Mic, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import { LanguageSelector } from '../components/LanguageSelector';
 import { SahaayaLogo } from '../components/SahaayaLogo';
@@ -8,7 +8,10 @@ import { LanguageCode } from '../types/sahaaya';
 interface WelcomeScreenProps {
   language: LanguageCode;
   hasDraftProgress: boolean;
+  spokenLanguageLabel?: string;
+  spokenCapabilityLabel?: string;
   onLanguageChange: (lang: LanguageCode) => void;
+  onOpenLanguageSettings?: () => void;
   onStartAssistant: () => void;
   onStartWithCommand?: (command: string) => void;
   onOpenForm: () => void;
@@ -17,7 +20,10 @@ interface WelcomeScreenProps {
 export function WelcomeScreen({
   language,
   hasDraftProgress,
+  spokenLanguageLabel,
+  spokenCapabilityLabel,
   onLanguageChange,
+  onOpenLanguageSettings,
   onStartAssistant,
   onStartWithCommand,
   onOpenForm,
@@ -84,7 +90,27 @@ export function WelcomeScreen({
             <p className="text-sm font-semibold text-[#493451]">
               {t.welcome.chooseLanguage}
             </p>
-            <LanguageSelector language={language} onChange={onLanguageChange} />
+            <div className="flex flex-wrap items-center gap-3">
+              <LanguageSelector language={language} onChange={onLanguageChange} />
+              {onOpenLanguageSettings && (
+                <button
+                  type="button"
+                  onClick={onOpenLanguageSettings}
+                  className="min-h-[46px] px-4 py-2 rounded-2xl border border-[#493451]/30 bg-[#EFEAF6] hover:bg-[#A995C8]/35 text-[#493451] text-sm font-semibold inline-flex items-center gap-2 cursor-pointer transition-colors"
+                >
+                  <Globe className="w-4 h-4 shrink-0" aria-hidden="true" />
+                  <span>
+                    All Languages &amp; Auto-Detect
+                    {spokenLanguageLabel ? ` · ${spokenLanguageLabel}` : ''}
+                  </span>
+                </button>
+              )}
+            </div>
+            {spokenCapabilityLabel && (
+              <p className="text-xs text-[#5C5363]">
+                Voice status: <span className="font-semibold text-[#493451]">{spokenCapabilityLabel}</span>
+              </p>
+            )}
           </div>
 
           {/* Primary Action & Secondary Form Option */}
@@ -145,7 +171,7 @@ export function WelcomeScreen({
               )}
             </div>
             <div className="mt-5 pt-4 border-t border-[var(--sahaaya-border)] flex items-center justify-between gap-4 text-sm text-[#5C5363]">
-              <span>English · हिन्दी · ಕನ್ನಡ</span>
+              <span>Multilingual · Indian &amp; Global</span>
               <span className="font-semibold text-[#493451]">
                 {t.welcome.cardSubtitle}
               </span>

@@ -8,6 +8,7 @@ import {
   Edit3,
   ExternalLink,
   FileText,
+  Globe,
   HelpCircle,
   Mic,
   PhoneOff,
@@ -34,6 +35,7 @@ import {
   PlatformCapabilities,
   SpeechCapabilities,
   SpeechErrorType,
+  VoiceCapabilityStatus,
   VoiceSessionState,
 } from '../types/sahaaya';
 import {
@@ -86,6 +88,11 @@ interface VoiceAssistantScreenProps {
   onSpellFinish: () => void;
   onConfirmTask: () => void;
   onCancelTask: () => void;
+  spokenLanguageLabel?: string;
+  spokenCapabilityStatus?: VoiceCapabilityStatus;
+  spokenCapabilityLabel?: string;
+  detectedLanguageNote?: string | null;
+  onOpenLanguageSettings?: () => void;
   onOpenForm: () => void;
   onOpenReview: () => void;
   onDismissError: () => void;
@@ -132,6 +139,11 @@ export function VoiceAssistantScreen({
   onSpellFinish,
   onConfirmTask,
   onCancelTask,
+  spokenLanguageLabel,
+  spokenCapabilityStatus,
+  spokenCapabilityLabel,
+  detectedLanguageNote,
+  onOpenLanguageSettings,
   onOpenForm,
   onOpenReview,
   onDismissError,
@@ -221,6 +233,16 @@ export function VoiceAssistantScreen({
         tone: 'lavender',
       };
     }
+    if (
+      spokenCapabilityStatus === 'text_only_unverified' ||
+      spokenCapabilityStatus === 'future_integration_required'
+    ) {
+      return {
+        title: `${spokenLanguageLabel || 'Selected language'} — ${spokenCapabilityLabel || 'Text input available'}`,
+        body: 'Standard web browsers do not verify speech recognition for this language. You can type or use mixed English/Hindi/Kannada commands below anytime.',
+        tone: 'lavender',
+      };
+    }
     if (capabilities.synthesisSupported && !hasCurrentLanguageVoice && language !== 'en') {
       return {
         title: t.languages[language].native,
@@ -292,13 +314,34 @@ export function VoiceAssistantScreen({
                   ? currentFieldMeta.label
                   : t.assistant.generalModeTitle}
             </p>
-            <p className="text-base sm:text-lg text-[#5C5363] max-w-xl mb-5">
+            <p className="text-base sm:text-lg text-[#5C5363] max-w-xl mb-3">
               {isConversationActive
                 ? t.assistant.conversationActiveHint
                 : conversationMode === 'welfare_form'
                   ? t.assistant.subtitle
                   : t.assistant.generalSubtitle}
             </p>
+
+            {/* Compact Spoken Language & Auto-Detect Switcher Pill */}
+            {(spokenLanguageLabel || detectedLanguageNote) && (
+              <div className="mb-4 flex flex-wrap items-center justify-center gap-2">
+                {onOpenLanguageSettings && (
+                  <button
+                    type="button"
+                    onClick={onOpenLanguageSettings}
+                    className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-[#EFEAF6] hover:bg-[#A995C8]/35 text-[#493451] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+                  >
+                    <Globe className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                    <span>Voice: {spokenLanguageLabel}</span>
+                  </button>
+                )}
+                {detectedLanguageNote && (
+                  <span className="px-3 py-1.5 rounded-xl bg-[#F7F1E8] border border-[var(--sahaaya-border)] text-xs font-medium text-[#5C5363]">
+                    {detectedLanguageNote}
+                  </span>
+                )}
+              </div>
+            )}
 
             {/* Central Animated Sahaaya Voice Orb */}
             <SahaayaVoiceOrb

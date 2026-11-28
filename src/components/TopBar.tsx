@@ -1,3 +1,4 @@
+import { Globe } from 'lucide-react';
 import { TRANSLATIONS } from '../i18n/translations';
 import { LanguageCode, ScreenId, TextScale } from '../types/sahaaya';
 import { LanguageSelector } from './LanguageSelector';
@@ -8,6 +9,8 @@ interface TopBarProps {
   currentScreen: ScreenId;
   language: LanguageCode;
   textScale: TextScale;
+  spokenLanguageLabel?: string;
+  onOpenLanguageSettings?: () => void;
   onNavigate: (screen: ScreenId) => void;
   onLanguageChange: (lang: LanguageCode) => void;
   onTextScaleChange: (scale: TextScale) => void;
@@ -17,6 +20,8 @@ export function TopBar({
   currentScreen,
   language,
   textScale,
+  spokenLanguageLabel,
+  onOpenLanguageSettings,
   onNavigate,
   onLanguageChange,
   onTextScaleChange,
@@ -70,8 +75,8 @@ export function TopBar({
           })}
         </nav>
 
-        {/* Zone 3: Accessibility controls (Text scale + compact language on desktop) */}
-        <div className="flex items-center gap-2.5 shrink-0">
+        {/* Zone 3: Accessibility controls (Text scale + compact language + universal voice selector) */}
+        <div className="flex items-center gap-2 shrink-0">
           <div className="hidden lg:block">
             <LanguageSelector
               language={language}
@@ -79,6 +84,19 @@ export function TopBar({
               compact
             />
           </div>
+          {onOpenLanguageSettings && (
+            <button
+              type="button"
+              onClick={onOpenLanguageSettings}
+              aria-label="Open all voice languages"
+              className="min-h-[42px] px-3 py-1.5 rounded-xl border border-[var(--sahaaya-border)] bg-[#FFFCF7] hover:bg-[#EFEAF6] text-[#493451] text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+            >
+              <Globe className="w-4 h-4 shrink-0" aria-hidden="true" />
+              <span className="max-w-[130px] truncate">
+                {spokenLanguageLabel || 'All Languages'}
+              </span>
+            </button>
+          )}
           <TextScaleToggle
             textScale={textScale}
             onChange={onTextScaleChange}

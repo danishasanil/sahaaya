@@ -158,3 +158,64 @@ export interface AssistantTask {
   educationLevel?: string | null;
 }
 
+export type UniversalLanguageMode = 'auto' | 'select' | 'custom';
+
+export type LanguageCategory = 'indian' | 'regional' | 'international';
+
+export type VoiceCapabilityStatus =
+  | 'voice_available'
+  | 'on_device_available'
+  | 'browser_dependent'
+  | 'text_only_unverified'
+  | 'future_integration_required';
+
+export interface SpokenLanguageOption {
+  id: string;
+  name: string;
+  nativeName: string;
+  bcp47: string;
+  category: LanguageCategory;
+  uiLang: LanguageCode;
+  defaultCapability: VoiceCapabilityStatus;
+  aliases: string[];
+  capabilityNote: string;
+}
+
+export interface UniversalLanguagePreferences {
+  mode: UniversalLanguageMode;
+  selectedLanguageId: string;
+  customLanguageName: string;
+}
+
+export interface LanguageDetectionResult {
+  detectedLanguageId: string;
+  detectedName: string;
+  uiResponseLang: LanguageCode;
+  isMixedLanguage: boolean;
+  secondaryLanguageId?: string;
+  confidence: 'high' | 'medium' | 'low';
+  shouldClarify: boolean;
+  reason: string;
+}
+
+export interface PronunciationNormalizationResult {
+  normalizedCommand: string;
+  matchedCorrections: string[];
+}
+
+export type BrowserEngineAvailability =
+  | 'available'
+  | 'downloadable'
+  | 'downloading'
+  | 'unavailable'
+  | 'unknown';
+
+export interface SpeechEngineSupportInfo {
+  locale: string;
+  recognitionSupported: boolean;
+  onDeviceSupported: boolean;
+  availability: BrowserEngineAvailability;
+  effectiveStatus: VoiceCapabilityStatus;
+}
+
+

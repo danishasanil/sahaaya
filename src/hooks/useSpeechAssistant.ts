@@ -11,7 +11,8 @@ import {
 
 export function useSpeechAssistant(
   lang: LanguageCode,
-  onFinalTranscript: (transcript: string) => void
+  onFinalTranscript: (transcript: string) => void,
+  speechLocale?: string
 ) {
   const onFinalRef = useRef(onFinalTranscript);
   useEffect(() => {
@@ -25,6 +26,7 @@ export function useSpeechAssistant(
   const [snapshot, setSnapshot] = useState<SpeechSnapshot>(() => {
     const temp = new SpeechSessionController({
       lang,
+      speechLocale,
       onFinalTranscript: () => {},
       onStateChange: () => {},
     });
@@ -45,6 +47,7 @@ export function useSpeechAssistant(
   useEffect(() => {
     const controller = new SpeechSessionController({
       lang,
+      speechLocale,
       onFinalTranscript: (text) => onFinalRef.current(text),
       onStateChange: (next) => setSnapshot(next),
     });
@@ -63,6 +66,14 @@ export function useSpeechAssistant(
   useEffect(() => {
     controllerRef.current?.setLanguage(lang);
   }, [lang]);
+
+  useEffect(() => {
+    if (speechLocale) {
+      controllerRef.current?.setSpeechLocale(speechLocale, {
+        preserveConversation: true,
+      });
+    }
+  }, [speechLocale]);
 
   useEffect(() => {
     if (snapshot.speechError === 'permission-denied') {

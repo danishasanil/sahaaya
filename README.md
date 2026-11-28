@@ -27,7 +27,7 @@ To ensure complete transparency during hackathon evaluation, every capability is
 - **Local Calendar Storage Engine** (`src/utils/calendarEngine.ts`): `localStorage`-backed event store (`sahaaya_demo_calendar_events_v1`) supporting relative dates (`today`, `tomorrow`, weekdays), month-day dates (`"30th November"`, `"नवंबर 30"`, `"ನವೆಂಬರ್ 30"`), numeric `DD/MM`, multi-turn `date` → `time` → `title` slot filling, plus add, inline edit, and delete.
 - **Real Browser Mode Execution** (`src/utils/platformExecutor.ts`): Opens official websites (`YouTube`, `Google`, `Google Maps`, `WhatsApp Web`, `Spotify Web`) in a new browser tab after explicit confirmation, prepares prefilled `https://wa.me/?text=...` drafts (never auto-sent), and requests `navigator.geolocation` only after user confirmation.
 - **Senior Citizen Welfare Application** (`src/utils/applicationLogic.ts`, `src/screens/ApplicationFormScreen.tsx`, `src/screens/ReviewScreen.tsx`, `src/screens/SuccessScreen.tsx`): 9-field validated form starting empty (`0/9`), readback confirmation, letter-by-letter name spelling pad, validation, receipt download, and explicit simulation disclaimer.
-- **Automated Test Suite** (`tests/sahaaya.test.ts`): **122/122 scenarios verified** via `npx tsx tests/sahaaya.test.ts`.
+- **Automated Test Suite** (`tests/sahaaya.test.ts`): **123/123 scenarios verified** via `npx tsx tests/sahaaya.test.ts`.
 
 ### B. Simulated Locally (Interactive Demo Mode)
 - **Simulated Smartphone Home Screen & 11 Apps** (`src/components/DemoDeviceScreen.tsx`, `src/utils/demoAppRegistry.ts`, `src/utils/demoExecutionEngine.ts`):
@@ -103,7 +103,7 @@ To ensure complete transparency during hackathon evaluation, every capability is
 │       ├── calendarEngine.ts          # Date/time parser & localStorage event CRUD
 │       └── applicationLogic.ts        # Welfare field parsing, validation & letter spelling
 └── tests/
-    └── sahaaya.test.ts         # 122 automated unit & multi-turn integration scenarios
+    └── sahaaya.test.ts         # 123 automated unit & multi-turn integration scenarios
 ```
 
 ---
@@ -154,7 +154,7 @@ Open **`http://localhost:3000`** in your browser.
 # TypeScript type check
 npm run lint
 
-# Run all 122 automated unit & integration tests
+# Run all 123 automated unit & integration tests
 npx tsx tests/sahaaya.test.ts
 
 # Build optimized production bundle into dist/
@@ -163,14 +163,19 @@ npm run build
 
 ---
 
-## 8. Running with Docker / Docker Compose
+## 8. Running with Docker / Docker Compose (Clean Clone Quickstart)
 
-> **Note:** Docker files are configured and ready for port `3000`, but Docker runtime execution has **not** been tested inside the AI Studio build container because the `docker` binary is unavailable there.
+Someone cloning this repository requires **no `.env` file**, **no API keys**, and **no manual `npm install` or `npm run build`** on the host machine:
 
 ```bash
-docker compose up --build
+git clone <repository-url>
+cd <repository-folder>
+docker compose up
 ```
-Then open **`http://localhost:3000`** (use `localhost` rather than `0.0.0.0` so browser microphone and geolocation APIs treat it as a secure context).
+
+Docker builds the multi-stage Vite production bundle inside the container (`node:20-alpine` → `nginx:1.27-alpine`) and serves the application on **`http://localhost:3000`** (use `localhost` rather than `0.0.0.0` so browser microphone and geolocation APIs treat it as a secure context).
+
+> **Verification Note:** Docker files are configured and audited, but `docker compose up` has **not** been runtime-executed inside the AI Studio build container because the `docker` CLI is unavailable in that environment.
 
 ---
 

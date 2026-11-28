@@ -33,6 +33,7 @@ export interface SpeechRecognitionInstance {
   continuous: boolean;
   interimResults: boolean;
   maxAlternatives: number;
+  processLocally?: boolean;
   onstart: (() => void) | null;
   onresult: ((event: SpeechRecognitionEventLike) => void) | null;
   onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
@@ -42,7 +43,17 @@ export interface SpeechRecognitionInstance {
   abort: () => void;
 }
 
-export type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance;
+export interface SpeechRecognitionConstructor {
+  new (): SpeechRecognitionInstance;
+  available?: (options: {
+    langs: string[];
+    processLocally?: boolean;
+  }) => Promise<'available' | 'downloadable' | 'downloading' | 'unavailable'>;
+  install?: (options: {
+    langs: string[];
+    processLocally?: boolean;
+  }) => Promise<boolean>;
+}
 
 export interface SpeechSynthesisUtteranceLike {
   lang: string;
@@ -72,6 +83,7 @@ export interface SpeechSnapshot {
   interimTranscript: string;
   speechError: SpeechErrorType | 'unexpected-stop';
   speechRate: SpeechRateMode;
+  speechLocale: string;
   capabilities: SpeechCapabilities;
 }
 
@@ -109,6 +121,8 @@ function defaultEnvironment(): SpeechEnvironment {
 export class SpeechSessionController {
   private env: SpeechEnvironment;
   private lang: LanguageCode;
+  private speechLocale: string;
+  private preferOnDevice = false;
   private onFinalTranscript: (transcript: string) => void;
   private onStateChange: (snapshot: SpeechSnapshot) => void;
 
@@ -131,6 +145,7 @@ export class SpeechSessionController {
 
   constructor(options: {
     lang: LanguageCode;
+    speechLocale?: string;
     onFinalTranscript: (transcript: string) => void;
     onStateChange: (snapshot: SpeechSnapshot) => void;
     env?: SpeechEnvironment;
@@ -138,6 +153,7 @@ export class SpeechSessionController {
   }) {
     this.env = options.env || defaultEnvironment();
     this.lang = options.lang;
+    this.speechLocale = options.speechLocale || BCP47_MAP[options.lang];
     this.speechRate = options.speechRate || 'normal';
     this.onFinalTranscript = options.onFinalTranscript;
     this.onStateChange = options.onStateChange;
@@ -167,6 +183,7 @@ export class SpeechSessionController {
       interimTranscript: this.interimTranscript,
       speechError: this.speechError,
       speechRate: this.speechRate,
+      speechLocale: this.speechLocale,
       capabilities: { ...this.capabilities },
     };
   }
@@ -202,7 +219,51 @@ export class SpeechSessionController {
   public setLanguage(lang: LanguageCode) {
     if (this.lang === lang) return;
     this.lang = lang;
+    this.speechLocale = BCP47_MAP[lang];
     this.endConversation();
+  }
+
+  /**
+   * Switches the spoken recognition BCP-47 locale without unnecessarily tearing down
+   * an ongoing conversation session (if actively listening, cleanly restarts recognition
+   * with the updated locale on the next cycle).
+   */
+  public setSpeechLocale(
+    locale: string,
+    options?: { preserveConversation?: boolean; preferOnDevice?: boolean }
+  ) {
+    const cleanLocale = locale.trim() || BCP47_MAP[this.lang];
+    const nextOnDevice = Boolean(options?.preferOnDevice);
+    if (this.speechLocale === cleanLocale && this.preferOnDevice === nextOnDevice) {
+      return;
+    }
+    this.speechLocale = cleanLocale;
+    this.preferOnDevice = nextOnDevice;
+
+    const preserve = options?.preserveConversation ?? true;
+    if (preserve && this.isConversationActive) {
+      if (this.sessionState === 'listening') {
+        this.teardownRecognition(true);
+        this.sessionState = 'idle';
+        this.emit();
+        this.scheduleListeningResume(120);
+      } else {
+        this.emit();
+      }
+      return;
+    }
+    this.emit();
+  }
+
+  public hasVoiceForLocale(locale: string): boolean {
+    const synth = this.env.getSynthesis();
+    if (!synth) return false;
+    const voices = synth.getVoices() || [];
+    const target = locale.toLowerCase();
+    const base = target.split('-')[0];
+    return voices.some(
+      (v) => v.lang.toLowerCase() === target || v.lang.toLowerCase().startsWith(base)
+    );
   }
 
   public setCallbacks(
@@ -471,7 +532,10 @@ export class SpeechSessionController {
 
     try {
       const recognition = new Ctor();
-      recognition.lang = BCP47_MAP[this.lang];
+      recognition.lang = this.speechLocale || BCP47_MAP[this.lang];
+      if (this.preferOnDevice && 'processLocally' in recognition) {
+        recognition.processLocally = true;
+      }
       // Single-utterance turn with automatic state-machine restart avoids duplicate
       // interim buffers on mobile Chrome while maintaining seamless continuous flow.
       recognition.continuous = false;
@@ -545,6 +609,14 @@ export class SpeechSessionController {
             break;
           case 'no-speech':
             this.speechError = 'no-speech';
+            this.emit();
+            break;
+          case 'language-not-supported':
+            // Stop retry loops immediately when browser rejects the selected speech locale
+            this.isConversationActive = false;
+            this.sessionState = 'error';
+            this.speechError = 'not-supported';
+            this.teardownRecognition(true);
             this.emit();
             break;
           case 'aborted':

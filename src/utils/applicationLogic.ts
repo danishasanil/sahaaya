@@ -598,6 +598,16 @@ export function parseConfirmationReply(rawText: string): ConfirmationReplyIntent
   }
 
   if (
+    /\b(no|nope|wrong|incorrect|not right|not correct)\b/.test(lower) ||
+    text.includes('नहीं') ||
+    text.includes('गलत') ||
+    text.includes('ಇಲ್ಲ') ||
+    text.includes('ತಪ್ಪು')
+  ) {
+    return 'reject';
+  }
+
+  if (
     /\b(edit|change|modify|fix|update|re-enter)\b/.test(lower) ||
     text.includes('बदल') ||
     text.includes('सुधार') ||
@@ -608,7 +618,8 @@ export function parseConfirmationReply(rawText: string): ConfirmationReplyIntent
   }
 
   if (
-    /\b(yes|yeah|yep|correct|right|confirm|proceed|continue|go ahead|ok|okay|sure|that is right|thats right)\b/.test(lower) ||
+    /\b(yes|yeah|yep|confirm|proceed|continue|go ahead|ok|okay|sure|that is right|thats right)\b/.test(lower) ||
+    /(?<!not\s)\b(correct|right)\b/.test(lower) ||
     text.includes('हाँ') ||
     text.includes('हां') ||
     text.includes('सही') ||
@@ -616,16 +627,6 @@ export function parseConfirmationReply(rawText: string): ConfirmationReplyIntent
     text.includes('ಸರಿ')
   ) {
     return 'confirm';
-  }
-
-  if (
-    /\b(no|nope|wrong|incorrect|not right|not correct)\b/.test(lower) ||
-    text.includes('नहीं') ||
-    text.includes('गलत') ||
-    text.includes('ಇಲ್ಲ') ||
-    text.includes('ತಪ್ಪು')
-  ) {
-    return 'reject';
   }
 
   return null;

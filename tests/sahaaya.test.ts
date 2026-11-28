@@ -3535,7 +3535,44 @@ async function runTests() {
     passed += 1;
   }
 
-  console.log(`SAHAAYA TEST SUITE PASSED: ${passed}/122 scenarios verified.`);
+  // Test 123: Name confirmation negation fix ("No, it's not correct, my name is Ganesha Rao.") & multilingual core flow
+  {
+    assert.equal(
+      parseConfirmationReply("No, it's not correct, my name is Ganesha Rao."),
+      'reject'
+    );
+    assert.equal(parseConfirmationReply('Not right, change it'), 'reject');
+    assert.equal(parseConfirmationReply('Yes, that is correct.'), 'confirm');
+
+    const replacement = parseVoiceInput(
+      "No, it's not correct, my name is Ganesha Rao.",
+      'fullName',
+      EMPTY_APPLICATION_DATA
+    );
+    assert.equal(replacement.type, 'field_updated');
+    if (replacement.type === 'field_updated') {
+      assert.equal(replacement.field, 'fullName');
+      assert.equal(replacement.value, 'Ganesha Rao');
+    }
+
+    // Core flow multilingual parity (EN / HI / KN)
+    const ytEn = parseNaturalCommand('Open YouTube and search for Hanuman Chalisa.', 'en');
+    const ytHi = parseNaturalCommand('यूट्यूब खोलो', 'hi');
+    const mapsKn = parseNaturalCommand('ಗೂಗಲ್ ಮ್ಯಾಪ್ಸ್ ತೆರೆಯಿರಿ', 'kn');
+    const calcEn = parseNaturalCommand('Calculate 45 + 55.', 'en');
+    const welfareEn = parseNaturalCommand('Help me fill out a welfare application.', 'en');
+    const casualEn = parseNaturalCommand('Hello, how are you?', 'en');
+
+    assert.equal(ytEn.task?.application, 'YouTube');
+    assert.equal(ytHi.task?.application, 'YouTube');
+    assert.equal(mapsKn.task?.application, 'Google Maps');
+    assert.equal(calcEn.task?.mathResult, '100');
+    assert.equal(welfareEn.webAction?.type, 'start_application');
+    assert.equal(casualEn.task?.intent, 'general_conversation');
+    passed += 1;
+  }
+
+  console.log(`SAHAAYA TEST SUITE PASSED: ${passed}/123 scenarios verified.`);
 }
 
 runTests().catch((err) => {
